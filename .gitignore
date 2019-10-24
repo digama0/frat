@@ -1,0 +1,5 @@
+/frat-rs/target
+Cargo.lock
+*.cnf
+*.p
+a.out
