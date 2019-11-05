@@ -1,4 +1,6 @@
 use std::fs::File;
+use std::process::exit;
+use std::collections::HashMap;
 use std::io::{self, Read, Seek, SeekFrom};
 use super::parser::{parse_unum, parse_num};
 
@@ -154,19 +156,59 @@ impl Iterator for BackParser {
 
 pub fn check_proof(proof: File) -> io::Result<()> {
   let bp = BackParser::new(proof)?;
-  let mut orig: i64 = 0;
-  let mut added: i64 = 0;
-  let mut deleted: i64 = 0;
-  let mut fin: i64 = 0;
+  let (mut orig, mut added, mut deleted, mut fin) = (0i64, 0i64, 0i64, 0i64);
+  let (mut dirty_orig, mut dirty_add, mut double_del, mut double_fin) = (0i64, 0i64, 0i64, 0i64);
+  let mut missing = 0i64;
+  let mut active = HashMap::new();
   for s in bp {
     match s {
-      Step::Orig(_, _) => orig += 1,
-      Step::Add(_, _, _) => added += 1,
-      Step::Del(_, _) => deleted += 1,
-      Step::Final(_, _) => fin += 1,
+      Step::Orig(i, _lits) => {
+        orig += 1;
+        if active.remove(&i).is_none() {
+          dirty_orig += 1;
+          // eprintln!("original clause {} {:?} never finalized", i, _lits);
+        }
+      },
+      Step::Add(i, _lits, p) => {
+        added += 1;
+        if p.is_none() { missing += 1 }
+        if active.remove(&i).is_none() {
+          dirty_add += 1;
+          // eprintln!("added clause {} {:?} never finalized", i, _lits);
+        }
+      },
+      Step::Del(i, lits) => {
+        deleted += 1;
+        if active.insert(i, lits).is_some() {
+          double_del += 1;
+          // eprintln!("already deleted clause {} {:?}", i, active[&i]);
+        }
+      },
+      Step::Final(i, lits) => {
+        fin += 1;
+        if active.insert(i, lits).is_some() {
+          double_fin += 1;
+          // eprintln!("already finalized clause {} {:?}", i, active[&i]);
+        }
+      },
     }
   }
-  println!("{} orig + {} added - {} deleted - {} finalized = {}\n",
+  println!("{} orig + {} added - {} deleted - {} finalized = {}",
     orig, added, deleted, fin, orig + added - deleted - fin);
+  println!("{} missing proofs ({:.1}%)", missing, 100. * missing as f32 / added as f32);
+  let mut bad = false;
+  if dirty_orig != 0 || dirty_add != 0 {
+    eprintln!("{} original + {} added never finalized", dirty_orig, dirty_add);
+    bad = true;
+  }
+  if double_del != 0 || double_fin != 0 {
+    eprintln!("{} double deletes + {} double finalized", double_del, double_fin);
+    bad = true;
+  }
+  if !active.is_empty() {
+    eprintln!("{} unjustified", active.len());
+    bad = true;
+  }
+  if bad { exit(1) }
   Ok(())
 }
