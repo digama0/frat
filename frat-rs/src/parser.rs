@@ -130,3 +130,19 @@ pub fn parse_dimacs<I: Iterator<Item=char>>(input: I) -> (usize, Vec<Clause>) {
     _ => panic!("parse DIMACS failed")
   }
 }
+
+pub fn parse_num<I: Iterator<Item=u8>>(it: &mut I) -> Option<i64> {
+  let mut ulit: u64 = 0;
+  let mut mul: u8 = 0;
+  for c in it {
+    ulit |= ((c & 0x7F) as u64) << mul;
+    mul += 7;
+    if c & 0x80 == 0 {
+      return Some(
+        if ulit & 1 != 0 { -((ulit >> 1) as i64) }
+        else { (ulit >> 1) as i64 })
+    }
+  }
+  if ulit != 0 { panic!("iterator ran out with incomplete number") }
+  None
+}

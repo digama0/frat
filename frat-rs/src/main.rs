@@ -1,5 +1,6 @@
 mod parser;
 mod dratchk;
+mod lratchk;
 
 use std::env;
 use std::io;
@@ -15,7 +16,7 @@ fn main() -> io::Result<()> {
 	let arg = args.next();
 	if arg.as_ref().map_or(false, |s| s == "-l") {
 		// LRAT backward checking for cadical
-		unimplemented!()
+		lratchk::check_proof(proof)?
 	} else {
 		let drat = dratchk::ProofIter(BufReader::new(proof).bytes().map(|r| r.expect("read failed")));
 		dratchk::process_proof(vars, &fmla, drat, match arg {

@@ -12,27 +12,6 @@ pub enum StepKind { Add, Del }
 
 pub struct ProofIter<I: Iterator<Item=u8>>(pub I);
 
-impl<I: Iterator<Item=u8>> ProofIter<I> {
-  fn parse_num(&mut self) -> Option<i64> {
-    let mut ulit: u64 = 0;
-    let mut mul: u8 = 0;
-    loop {
-      match self.0.next() {
-        None => return None,
-        Some(c) => {
-          ulit |= ((c & 0x7F) as u64) << mul;
-          mul += 7;
-          if c & 0x80 == 0 {
-            return Some(
-              if ulit & 1 != 0 { -((ulit >> 1) as i64) }
-              else { (ulit >> 1) as i64 })
-          }
-        }
-      }
-    }
-  }
-}
-
 impl<I: Iterator<Item=u8>> Iterator for ProofIter<I> {
 	type Item = (StepKind, Clause);
 
@@ -46,7 +25,7 @@ impl<I: Iterator<Item=u8>> Iterator for ProofIter<I> {
       k => panic!("incorrect step {:?}, is this not a binary file?", k) };
     let mut vec = Vec::new();
     loop {
-      match self.parse_num().expect("expected literal") {
+      match parse_num(&mut self.0).expect("expected literal") {
         0 => return Some((k, Rc::new(vec))),
         lit => vec.push(lit)
       }
