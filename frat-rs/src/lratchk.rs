@@ -12,7 +12,8 @@ enum Segment {
   Add(u64, Vec<i64>),
   LProof(Vec<u64>),
   Del(u64, Vec<i64>),
-  Final(u64, Vec<i64>)
+  Final(u64, Vec<i64>),
+  Todo(u64),
 }
 
 #[derive(Debug)]
@@ -26,6 +27,7 @@ enum Step {
   Add(u64, Vec<i64>, Option<Proof>),
   Del(u64, Vec<i64>),
   Final(u64, Vec<i64>),
+  Todo(u64),
 }
 
 struct BackParser {
@@ -70,6 +72,7 @@ impl BackParser {
     const F: u8 = 'f' as u8;
     const O: u8 = 'o' as u8;
     const L: u8 = 'l' as u8;
+    const T: u8 = 't' as u8;
     fn mk_uvec<I: Iterator<Item=u8>>(mut it: I) -> Vec<u64> {
       let mut vec = Vec::new();
       loop { match parse_unum(&mut it).expect("bad step") {
@@ -86,6 +89,7 @@ impl BackParser {
       Some(F) => Segment::Final(parse_unum(&mut it).unwrap(), mk_ivec(&mut it)),
       Some(L) => Segment::LProof(mk_uvec(&mut it)),
       Some(O) => Segment::Orig(parse_unum(&mut it).unwrap(), mk_ivec(&mut it)),
+      Some(T) => Segment::Todo(parse_unum(&mut it).unwrap()),
       Some(k) => panic!("bad step {:?}", k as char),
       None => panic!("bad step None"),
     }
@@ -150,6 +154,7 @@ impl Iterator for BackParser {
           Some(Step::Add(idx, vec, Some(Proof::LRAT(steps)))),
         _ => panic!("'l' step not preceded by 'a' step")
       },
+      Some(Segment::Todo(idx)) => Some(Step::Todo(idx)),
     }
   }
 }
@@ -160,6 +165,7 @@ pub fn check_proof(proof: File) -> io::Result<()> {
   let (mut dirty_orig, mut dirty_add, mut double_del, mut double_fin) = (0i64, 0i64, 0i64, 0i64);
   let mut missing = 0i64;
   let mut active = HashMap::new();
+  let mut todos = HashMap::new();
   for s in bp {
     match s {
       Step::Orig(i, _lits) => {
@@ -191,11 +197,17 @@ pub fn check_proof(proof: File) -> io::Result<()> {
           // eprintln!("already finalized clause {} {:?}", i, active[&i]);
         }
       },
+      Step::Todo(i) => *todos.entry(i).or_insert(0i64) += 1,
     }
   }
   println!("{} orig + {} added - {} deleted - {} finalized = {}",
     orig, added, deleted, fin, orig + added - deleted - fin);
   println!("{} missing proofs ({:.1}%)", missing, 100. * missing as f32 / added as f32);
+  let mut todo_vec: Vec<_> = todos.into_iter().collect();
+  todo_vec.sort_by_key(|(_, v)| -v);
+  for (k, v) in todo_vec.into_iter().take(5).filter(|&(_, v)| v != 0) {
+    println!("type {}: {}", k, v);
+  }
   let mut bad = false;
   if dirty_orig != 0 || dirty_add != 0 {
     eprintln!("{} original + {} added never finalized", dirty_orig, dirty_add);
