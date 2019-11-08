@@ -160,13 +160,13 @@ impl Iterator for BackParser {
 }
 
 pub fn check_proof(proof: File) -> io::Result<()> {
-  let bp = BackParser::new(proof)?;
+  let mut bp = BackParser::new(proof)?.peekable();
   let (mut orig, mut added, mut deleted, mut fin) = (0i64, 0i64, 0i64, 0i64);
   let (mut dirty_orig, mut dirty_add, mut double_del, mut double_fin) = (0i64, 0i64, 0i64, 0i64);
   let mut missing = 0i64;
   let mut active = HashMap::new();
   let mut todos = HashMap::new();
-  for s in bp {
+  while let Some(s) = bp.next() {
     match s {
       Step::Orig(i, _lits) => {
         orig += 1;
@@ -181,6 +181,10 @@ pub fn check_proof(proof: File) -> io::Result<()> {
         if active.remove(&i).is_none() {
           dirty_add += 1;
           // eprintln!("added clause {} {:?} never finalized", i, _lits);
+        }
+        if let Some(Step::Todo(_)) = bp.peek() {} else if p.is_none() {
+          *todos.entry(0).or_insert(0i64) += 1;
+          // eprintln!("added clause {} {:?} has no proof and no todo", i, _lits);
         }
       },
       Step::Del(i, lits) => {
