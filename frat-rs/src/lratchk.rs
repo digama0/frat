@@ -20,7 +20,8 @@ enum Segment {
 
 #[derive(Debug)]
 enum Proof {
-  LRAT(Vec<u64>)
+  LRAT(Vec<u64>),
+  Sorry
 }
 
 #[derive(Debug)]
@@ -165,11 +166,15 @@ fn subsumes(clause: &Clause, clause2: &Clause) -> bool {
   clause2.iter().all(|lit2| clause.contains(lit2))
 }
 
+fn print_seg(seg: &Segment) {
+  unimplemented!()
+}
 
-
-fn check_proof_step(_active: &mut HashMap<u64, (bool, Clause)>, _cl: &Clause, _p: Option<Proof>) -> bool {
-  // TODO
-  true
+fn check_proof_step(_active: &mut HashMap<u64, (bool, Clause)>, _cl: &Clause, p: Option<Proof>) -> Option<Proof> {
+  match p {
+    None => Some(Proof::Sorry),
+    Some(p) => Some(p)
+  }
 }
 
 pub fn check_proof(proof: File) -> io::Result<()> {
@@ -212,9 +217,24 @@ pub fn check_proof(proof: File) -> io::Result<()> {
               eprintln!("added {:?}, removed {:?}", lits2, lits);
               bad = true;
             }
-            if need && !check_proof_step(&mut active, &lits, p) {
-              eprintln!("bad proof for {:?}", lits);
-              bad = true;
+            if need {
+              match check_proof_step(&mut active, &lits, p) {
+                None => {
+                  eprintln!("bad proof for {:?}", lits);
+                  bad = true;
+                },
+                Some(p) => {
+                  if let Proof::LRAT(steps) = p {
+                    for s in steps {
+                      let needed = &mut active.get_mut(&s).expect("bad LRAT proof").0;
+                      if !*needed {
+                        unimplemented!();
+                        *needed = true;
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
         }
