@@ -6,13 +6,15 @@ use super::parser::{parse_unum, parse_num};
 
 const BUFFER_SIZE: usize = 0x4000;
 
+type Clause = Vec<i64>;
+
 #[derive(Debug)]
 enum Segment {
-  Orig(u64, Vec<i64>),
-  Add(u64, Vec<i64>),
+  Orig(u64, Clause),
+  Add(u64, Clause),
   LProof(Vec<u64>),
-  Del(u64, Vec<i64>),
-  Final(u64, Vec<i64>),
+  Del(u64, Clause),
+  Final(u64, Clause),
   Todo(u64),
 }
 
@@ -23,10 +25,10 @@ enum Proof {
 
 #[derive(Debug)]
 enum Step {
-  Orig(u64, Vec<i64>),
-  Add(u64, Vec<i64>, Option<Proof>),
-  Del(u64, Vec<i64>),
-  Final(u64, Vec<i64>),
+  Orig(u64, Clause),
+  Add(u64, Clause, Option<Proof>),
+  Del(u64, Clause),
+  Final(u64, Clause),
   Todo(u64),
 }
 
@@ -78,7 +80,7 @@ impl BackParser {
       loop { match parse_unum(&mut it).expect("bad step") {
         0 => return vec,
         i => vec.push(i) } } }
-    fn mk_ivec<I: Iterator<Item=u8>>(mut it: I) -> Vec<i64> {
+    fn mk_ivec<I: Iterator<Item=u8>>(mut it: I) -> Clause {
       let mut vec = Vec::new();
       loop { match parse_num(&mut it).expect("bad step") {
         0 => return vec,
@@ -159,44 +161,74 @@ impl Iterator for BackParser {
   }
 }
 
+fn subsumes(clause: &Clause, clause2: &Clause) -> bool {
+  clause2.iter().all(|lit2| clause.contains(lit2))
+}
+
+
+
+fn check_proof_step(_active: &mut HashMap<u64, (bool, Clause)>, _cl: &Clause, _p: Option<Proof>) -> bool {
+  // TODO
+  true
+}
+
 pub fn check_proof(proof: File) -> io::Result<()> {
   let mut bp = BackParser::new(proof)?.peekable();
   let (mut orig, mut added, mut deleted, mut fin) = (0i64, 0i64, 0i64, 0i64);
   let (mut dirty_orig, mut dirty_add, mut double_del, mut double_fin) = (0i64, 0i64, 0i64, 0i64);
   let mut missing = 0i64;
-  let mut active = HashMap::new();
+  let mut active: HashMap<u64, (bool, Clause)> = HashMap::new();
   let mut todos = HashMap::new();
+  let mut bad = false;
   while let Some(s) = bp.next() {
     match s {
-      Step::Orig(i, _lits) => {
+      Step::Orig(i, lits) => {
         orig += 1;
-        if active.remove(&i).is_none() {
-          dirty_orig += 1;
-          // eprintln!("original clause {} {:?} never finalized", i, _lits);
+        match active.remove(&i) {
+          None => {
+            dirty_orig += 1;
+            // eprintln!("original clause {} {:?} never finalized", i, lits);
+          },
+          Some((_, lits2)) => if !subsumes(&lits2, &lits) {
+            eprintln!("added {:?}, removed {:?}", lits2, lits);
+            bad = true;
+          }
         }
       },
-      Step::Add(i, _lits, p) => {
+      Step::Add(i, lits, p) => {
         added += 1;
         if p.is_none() { missing += 1 }
-        if active.remove(&i).is_none() {
-          dirty_add += 1;
-          // eprintln!("added clause {} {:?} never finalized", i, _lits);
-        }
         if let Some(Step::Todo(_)) = bp.peek() {} else if p.is_none() {
           *todos.entry(0).or_insert(0i64) += 1;
-          // eprintln!("added clause {} {:?} has no proof and no todo", i, _lits);
+          // eprintln!("added clause {} {:?} has no proof and no todo", i, lits);
+        }
+        match active.remove(&i) {
+          None => {
+            dirty_add += 1;
+            // eprintln!("added clause {} {:?} never finalized", i, lits);
+          },
+          Some((need, lits2)) => {
+            if !subsumes(&lits2, &lits) {
+              eprintln!("added {:?}, removed {:?}", lits2, lits);
+              bad = true;
+            }
+            if need && !check_proof_step(&mut active, &lits, p) {
+              eprintln!("bad proof for {:?}", lits);
+              bad = true;
+            }
+          }
         }
       },
       Step::Del(i, lits) => {
         deleted += 1;
-        if active.insert(i, lits).is_some() {
+        if active.insert(i, (false, lits)).is_some() {
           double_del += 1;
           // eprintln!("already deleted clause {} {:?}", i, active[&i]);
         }
       },
       Step::Final(i, lits) => {
         fin += 1;
-        if active.insert(i, lits).is_some() {
+        if active.insert(i, (lits.is_empty(), lits)).is_some() {
           double_fin += 1;
           // eprintln!("already finalized clause {} {:?}", i, active[&i]);
         }
@@ -212,7 +244,6 @@ pub fn check_proof(proof: File) -> io::Result<()> {
   for (k, v) in todo_vec.into_iter().take(5).filter(|&(_, v)| v != 0) {
     println!("type {}: {}", k, v);
   }
-  let mut bad = false;
   if dirty_orig != 0 || dirty_add != 0 {
     eprintln!("{} original + {} added never finalized", dirty_orig, dirty_add);
     bad = true;
