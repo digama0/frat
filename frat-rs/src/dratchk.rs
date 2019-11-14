@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::convert::{TryInto};
 use std::cell::RefCell;
 use std::io::*;
+use super::dimacs::Clause;
 use super::parser::*;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

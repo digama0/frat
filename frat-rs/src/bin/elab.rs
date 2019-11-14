@@ -1,44 +1,18 @@
+#[path="../dimacs.rs"] mod dimacs;
 #[path="../parser.rs"] mod parser;
+#[path="../backparser.rs"] pub mod backparser;
 
 // use std::process::exit;
 // use std::collections::HashMap;
-use std::io::{self, Read, Write, Seek, SeekFrom};
+use std::io::{self, Write};
 use std::fs::{File, read_to_string};
 use std::env;
 use std::convert::TryInto;
-use parser::{parse_unum, parse_num, parse_dimacs};
+use dimacs::parse_dimacs;
+use backparser::*;
 use std::collections::HashMap;
 
-const BUFFER_SIZE: usize = 0x4000;
-
-type Clause = Vec<i64>;
-
-#[derive(Debug)]
-enum Segment {
-  Orig(u64, Vec<i64>),
-  Add(u64, Vec<i64>),
-  LProof(Vec<u64>),
-  Del(u64, Vec<i64>),
-  Final(u64, Vec<i64>),
-  Todo(u64),
-}
-
-#[derive(Debug)]
-pub enum Proof {
-  LRAT(Vec<u64>)
-}
-
-#[derive(Debug)]
-pub enum Step {
-  Orig(u64, Vec<i64>),
-  Add(u64, Vec<i64>, Option<Proof>),
-  Del(u64, Vec<i64>),
-  Final(u64, Vec<i64>),
-  Todo(u64),
-}
-
-#[derive(Debug)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum ElabStep {
   Orig(u64, Vec<i64>),
   Add(u64, Vec<i64>, Vec<u64>),
@@ -52,142 +26,12 @@ pub enum ClaSta {
   Plural
 }
 
-// #[derive(Clone)]
-// #[derive(Debug)]
+// #[derive(Clone, Debug)]
 struct IdCla<'a> {
   id: u64,
-  marked: bool,
+  _marked: bool,
   used: bool,
   cla: & 'a Clause
-}
-
-struct BackParser {
-  file: File,
-  remaining: usize,
-  pos: usize,
-  last_read: usize,
-  buffers: Vec<Box<[u8]>>,
-  free: Vec<Box<[u8]>>,
-}
-
-impl BackParser {
-  fn new(mut file: File) -> io::Result<BackParser> {
-    let len = file.metadata()?.len() as usize;
-    let pos = len % BUFFER_SIZE;
-    file.seek(SeekFrom::End(-(pos as i64)))?;
-    let mut buf = Box::new([0; BUFFER_SIZE]);
-    file.read_exact(&mut buf[..pos])?;
-    Ok(BackParser {
-      file,
-      remaining: len / BUFFER_SIZE,
-      pos,
-      last_read: pos,
-      buffers: vec![buf],
-      free: Vec::new()
-    })
-  }
-
-  fn read_chunk(&mut self) -> io::Result<Option<Box<[u8]>>> {
-    if self.remaining == 0 { return Ok(None) }
-    let mut buf: Box<[u8]> = self.free.pop().unwrap_or_else(|| Box::new([0; BUFFER_SIZE]));
-    self.file.seek(SeekFrom::Current(-((BUFFER_SIZE + self.last_read) as i64)))?;
-    self.file.read_exact(&mut buf)?;
-    self.last_read = BUFFER_SIZE;
-    self.remaining -= 1;
-    Ok(Some(buf))
-  }
-
-  fn parse_segment<I: Iterator<Item=u8>>(mut it: I) -> Segment {
-    const A: u8 = 'a' as u8;
-    const D: u8 = 'd' as u8;
-    const F: u8 = 'f' as u8;
-    const O: u8 = 'o' as u8;
-    const L: u8 = 'l' as u8;
-    const T: u8 = 't' as u8;
-    fn mk_uvec<I: Iterator<Item=u8>>(mut it: I) -> Vec<u64> {
-      let mut vec = Vec::new();
-      loop { match parse_unum(&mut it).expect("bad step") {
-        0 => return vec,
-        i => vec.push(i) } } }
-    fn mk_ivec<I: Iterator<Item=u8>>(mut it: I) -> Vec<i64> {
-      let mut vec = Vec::new();
-      loop { match parse_num(&mut it).expect("bad step") {
-        0 => return vec,
-        i => vec.push(i) } } }
-    match it.next() {
-      Some(A) => Segment::Add(parse_unum(&mut it).unwrap(), mk_ivec(&mut it)),
-      Some(D) => Segment::Del(parse_unum(&mut it).unwrap(), mk_ivec(&mut it)),
-      Some(F) => Segment::Final(parse_unum(&mut it).unwrap(), mk_ivec(&mut it)),
-      Some(L) => Segment::LProof(mk_uvec(&mut it)),
-      Some(O) => Segment::Orig(parse_unum(&mut it).unwrap(), mk_ivec(&mut it)),
-      Some(T) => Segment::Todo(parse_unum(&mut it).unwrap()),
-      Some(k) => panic!("bad step {:?}", k as char),
-      None => panic!("bad step None"),
-    }
-  }
-
-  fn parse_segment_from(&mut self, b: usize, i: usize) -> Segment {
-    if b == 0 {
-      let res = BackParser::parse_segment(self.buffers[0][i..self.pos].iter().copied());
-      self.pos = i;
-      return res
-    } else {
-      let res = BackParser::parse_segment(
-        self.buffers[b][i..].iter()
-          .chain(self.buffers[1..b].iter().rev().flat_map(|buf| buf.iter()))
-          .chain(self.buffers[0][..self.pos].iter()).copied());
-      self.pos = i;
-      self.free.extend(self.buffers.drain(0..b));
-      return res
-    }
-  }
-
-  fn next_segment(&mut self) -> Option<Segment> {
-    for b in 0.. {
-      let buf: &[u8] = match self.buffers.get(b) {
-        None => match self.read_chunk().expect("could not read from proof file") {
-          None => {
-            if b == 1 && self.pos == 0 { break }
-            return Some(self.parse_segment_from(b-1, 0))
-          },
-          Some(buf) => { self.buffers.push(buf); self.buffers.last().unwrap() }
-        },
-        Some(buf) => buf
-      };
-      if b == 0 {
-        if self.pos != 0 {
-          for i in (0..self.pos-1).rev() {
-            if buf[i] == 0 { return Some(self.parse_segment_from(b, i+1)) }
-          }
-        }
-      } else {
-        for (i, &v) in buf.iter().enumerate().rev() {
-          if v == 0 { return Some(self.parse_segment_from(b, i+1)) }
-        }
-      }
-    }
-    None
-  }
-}
-
-impl Iterator for BackParser {
-  type Item = Step;
-
-  fn next(&mut self) -> Option<Step> {
-    match self.next_segment() {
-      None => None,
-      Some(Segment::Orig(idx, vec)) => Some(Step::Orig(idx, vec)),
-      Some(Segment::Add(idx, vec)) => Some(Step::Add(idx, vec, None)),
-      Some(Segment::Del(idx, vec)) => Some(Step::Del(idx, vec)),
-      Some(Segment::Final(idx, vec)) => Some(Step::Final(idx, vec)),
-      Some(Segment::LProof(steps)) => match self.next_segment() {
-        Some(Segment::Add(idx, vec)) =>
-          Some(Step::Add(idx, vec, Some(Proof::LRAT(steps)))),
-        _ => panic!("'l' step not preceded by 'a' step")
-      },
-      Some(Segment::Todo(idx)) => Some(Step::Todo(idx))
-    }
-  }
 }
 
 fn clause_status(v: &Vec<i64>, c: &Clause) -> ClaSta {
@@ -342,17 +186,17 @@ fn elab(frat: File, temp: &mut File) -> io::Result<()> {
       Step::Add(i, ls, p) => {
         if cs.get(&i).unwrap().0 {
           let is : Vec<u64> = match p {
-            None => {
+            Some(Proof::LRAT(is)) => is,
+            _ => {
               // v is the valuation obtained by negating all literals in the clause to be added
               let v : Vec<i64> = ls.iter().map(|x| -x).collect();
               // scs is all the potentially vailable clauses (i.e., both active and passive)
               // against which v will be shown to be unsat
 
-              let ics : Vec<IdCla> = cs.iter().map(|x| IdCla {id: *x.0, marked:(x.1).0, used: false, cla: &(x.1).1}).collect();
+              let ics : Vec<IdCla> = cs.iter().map(|x| IdCla {id: *x.0, _marked:(x.1).0, used: false, cla: &(x.1).1}).collect();
               // js is the IDs of clauses used in showing v unsat
               propagate(v, ics)
             }
-            Some(Proof::LRAT(is)) => is
           };
           undelete(&is, &mut cs, temp);
           temp.write(&Binary::encode(&ElabStep::Add(i, ls, is)))
@@ -377,7 +221,7 @@ fn elab(frat: File, temp: &mut File) -> io::Result<()> {
   Ok(())
 }
 
-fn trim_bin(cnf: Vec<parser::Clause>, temp: File, lrat: &mut File) -> io::Result<()> {
+fn trim_bin(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut File) -> io::Result<()> {
   let mut k: u64 = cnf.len().try_into().unwrap(); // Counter for the last used ID
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
   let mut bp = BackParser::new(temp)?.peekable();
@@ -426,7 +270,7 @@ fn trim_bin(cnf: Vec<parser::Clause>, temp: File, lrat: &mut File) -> io::Result
   Ok(())
 }
 
-// fn calc_lrat(p: Vec<parser::Clause>, ls: Vec<Lstep>) -> Vec<Lstep> {
+// fn calc_lrat(p: Vec<dimacs::Clause>, ls: Vec<Lstep>) -> Vec<Lstep> {
 //   let k: u64 = p.len().try_into().unwrap();
 //   let mut m: Vec<(u64, u64)> = Vec::new();
 //   calc_id_map(p, k, &ls, &mut m);
@@ -442,7 +286,7 @@ fn is_perm(v: &Vec<i64>, w: &Vec<i64>) -> bool {
   true
 }
 
-// fn calc_id_map(p: Vec<parser::Clause>, mut k: u64, lns: &Vec<Lstep>, m: &mut Vec<(u64, u64)>) {
+// fn calc_id_map(p: Vec<dimacs::Clause>, mut k: u64, lns: &Vec<Lstep>, m: &mut Vec<(u64, u64)>) {
 //   for ln in lns {
 //     match ln {
 //       Lstep::Orig(i, ls) => {

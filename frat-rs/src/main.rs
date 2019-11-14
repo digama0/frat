@@ -1,4 +1,6 @@
+mod dimacs;
 mod parser;
+mod backparser;
 mod dratchk;
 mod lratchk;
 
@@ -6,7 +8,6 @@ use std::env;
 use std::io;
 use std::fs::{read_to_string, File};
 use std::io::*;
-use parser::*;
 
 fn main() -> io::Result<()> {
   let mut args = env::args().skip(1);
@@ -16,7 +17,7 @@ fn main() -> io::Result<()> {
 		// LRAT backward checking for cadical
 		lratchk::check_proof(proof)?
 	} else {
-		let (vars, fmla) = parse_dimacs(read_to_string(arg1)?.chars());
+		let (vars, fmla) = dimacs::parse_dimacs(read_to_string(arg1)?.chars());
 		let drat = dratchk::ProofIter(BufReader::new(proof).bytes().map(|r| r.expect("read failed")));
 		dratchk::process_proof(vars, &fmla, drat, match args.next() {
 			None => false,
