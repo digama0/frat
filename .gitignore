@@ -1,4 +1,4 @@
-/frat-rs/target
+target
 Cargo.lock
 *.cnf
 *.p
