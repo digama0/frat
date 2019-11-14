@@ -215,7 +215,7 @@ impl Serialize for Step {
       Step::Orig(idx, ref vec) => ('o', (idx, vec)).write(w),
       Step::Add(idx, ref vec, None) => ('a', (idx, vec)).write(w),
       Step::Add(idx, ref vec, Some(Proof::Sorry)) =>
-        (('t', (999u8, 0u8)), ('a', (idx, vec))).write(w),
+        (('t', (127u8, 0u8)), ('a', (idx, vec))).write(w),
       Step::Add(idx, ref vec, Some(Proof::LRAT(ref steps))) =>
         (('a', (idx, vec)), ('l', steps)).write(w),
       Step::Del(idx, ref vec) => ('d', (idx, vec)).write(w),
