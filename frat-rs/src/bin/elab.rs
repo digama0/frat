@@ -91,9 +91,10 @@ fn propagate_hint(ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>, is: &Vec
   let mut steps: Vec<u64> = Vec::new();
   for &c in is {
     let mut uf: Option<i64> = None;
-    for &l in &active.get(&c)?.1 {
+    for &l in &active.get(&c).expect("bad hint: clause does not exist").1 {
       if !asn.contains_key(&-l) {
-        if uf.replace(l).is_some() {return None}
+        assert!(uf.replace(l).is_none(),
+          "bad hint: clause {:?} is not unit", c);
       }
     }
     match uf {
@@ -107,7 +108,7 @@ fn propagate_hint(ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>, is: &Vec
       }
     }
   }
-  None
+  panic!("bad hint: unit propagation failed to find conflict")
 }
 
 fn propagate_minimize(active: &HashMap<u64, (bool, Clause)>,
@@ -139,7 +140,7 @@ fn undelete<W: Write>(is: &Vec<u64>, cs: &mut HashMap<u64, (bool, Clause)>, w: &
 
 fn elab(frat: File, temp: File) -> io::Result<()> {
   let w = &mut BufWriter::new(temp);
-  let mut bp = BackParser::new(frat)?.peekable();
+  let mut bp = BackParser::new(frat)?;
   let mut active: HashMap<u64, (bool, Clause)> = HashMap::new();
 
   while let Some(s) = bp.next() {
@@ -190,20 +191,19 @@ fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io:
 
       Step::Orig(i, ls) => {
         let j = cnf.iter().position(|x| is_perm(x, &ls)) // Find position of clause in original problem
-          .expect("Orig steps refers to nonexistent clause") as u64;
+          .expect("Orig step refers to nonexistent clause") as u64;
         assert!(m.insert(i, j + 1).is_none(), "Multiple orig steps with duplicate IDs");
       },
       Step::Add(i, ls, Some(Proof::LRAT(is))) => {
         k += 1; // Get the next fresh ID
         m.insert(i, k); // The ID of added clause is mapped to a fresh ID
         let b = ls.is_empty();
-        let js: Vec<u64> = is.iter().map(|x| m[x].clone()).collect();
         // lrat.write(&Binary::encode(&ElabStep::Add(j, ls, js)))
         //   .expect("Cannot write trimmed add step");
         write!(lrat, "{}", k)?;
         for x in ls { write!(lrat, " {}", x)? }
         write!(lrat, " 0")?;
-        for x in js { write!(lrat, " {}", x)? }
+        for x in is { write!(lrat, " {}", m[&x])? }
         write!(lrat, " 0\n")?;
 
         if b {return Ok(())}
@@ -290,10 +290,13 @@ fn main() -> io::Result<()> {
   let temp_path = format!("{}.temp", frat_path);
   let frat = File::open(frat_path)?;
   let temp_write = File::create(&temp_path)?;
+  eprintln!("elaborating...");
   elab(frat, temp_write)?;
+  eprintln!("parsing DIMACS...");
 
   let temp_read = File::open(temp_path)?;
   let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
+  eprintln!("trimming...");
   if let Some(p) = args.next() {
     trim_bin(cnf, temp_read, &mut File::create(p)?)?;
   } else {
