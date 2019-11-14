@@ -74,14 +74,14 @@ impl BackParser {
     const O: u8 = 'o' as u8;
     const L: u8 = 'l' as u8;
     const T: u8 = 't' as u8;
-    fn mk_uvec<I: Iterator<Item=u8>>(mut it: I) -> Vec<u64> {
+    fn mk_uvec<I: Iterator<Item=u8>>(it: &mut I) -> Vec<u64> {
       let mut vec = Vec::new();
-      loop { match parse_unum(&mut it).expect("bad step") {
+      loop { match parse_unum(it).expect("bad step") {
         0 => return vec,
         i => vec.push(i) } } }
-    fn mk_ivec<I: Iterator<Item=u8>>(mut it: I) -> Clause {
+    fn mk_ivec<I: Iterator<Item=u8>>(it: &mut I) -> Clause {
       let mut vec = Vec::new();
-      loop { match parse_num(&mut it).expect("bad step") {
+      loop { match parse_num(it).expect("bad step") {
         0 => return vec,
         i => vec.push(i) } } }
     match it.next() {
