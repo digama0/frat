@@ -2,6 +2,7 @@ pub mod dimacs;
 mod parser;
 mod backparser;
 mod lratchk;
+mod serialize;
 
 use std::env;
 use std::io;

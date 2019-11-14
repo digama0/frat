@@ -1,15 +1,17 @@
 #[path="../dimacs.rs"] mod dimacs;
 #[path="../parser.rs"] mod parser;
+#[path="../serialize.rs"] mod serialize;
 #[path="../backparser.rs"] pub mod backparser;
 
 // use std::process::exit;
 // use std::collections::HashMap;
-use std::io::{self, Write};
+use std::io::{self, Write, BufWriter};
 use std::fs::{File, read_to_string};
 use std::env;
 use std::convert::TryInto;
 use dimacs::parse_dimacs;
 use backparser::*;
+use serialize::Serialize;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -17,6 +19,17 @@ pub enum ElabStep {
   Orig(u64, Vec<i64>),
   Add(u64, Vec<i64>, Vec<u64>),
   Del(u64),
+}
+
+impl Serialize for ElabStep {
+  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    match *self {
+      ElabStep::Orig(idx, ref vec) => ('o', (idx, vec)).write(w),
+      ElabStep::Add(idx, ref vec, ref steps) =>
+        (('a', (idx, vec)), ('l', steps)).write(w),
+      ElabStep::Del(idx) => ('d', (idx, 0u8)).write(w),
+    }
+  }
 }
 
 // Type used to represent the status of a clause under a specific variable assigntment.
@@ -90,84 +103,17 @@ fn propagate(v: Vec<i64>, cs: Vec<IdCla>) -> Vec<u64> {
   propagate_core(is, v, cs)
 }
 
-fn undelete(is: &Vec<u64>, cs: &mut HashMap<u64, (bool, Clause)>, temp: &mut File) {
+fn undelete<W: Write>(is: &Vec<u64>, cs: &mut HashMap<u64, (bool, Clause)>, w: &mut W) {
   for i in is {
     if ! cs.get(i).unwrap().0 { // If the necessary clause is not active yet
       cs.get_mut(i).unwrap().0 = true; // Make it active
-      temp.write(&Binary::encode(&ElabStep::Del(*i)))
-        .expect("Failed to write delete step");
+      ElabStep::Del(*i).write(w).expect("Failed to write delete step");
     }
   }
 }
 
-trait Binary {
-  fn encode(x: &Self) -> Vec<u8>;
-  // fn decode(v: Vec<u8>) -> Option<Vec<u8>>;
-}
-
-impl Binary for u64 {
-  fn encode(x: &u64) -> Vec<u8> {
-
-    let mut y = *x;
-    let mut v = Vec::new();
-
-    while 128 <= y {
-      let u = (y % 128) as u8;
-      v.push(u);
-      y = y / 128;
-    }
-    v.push(y as u8);
-    v
-  }
-}
-
-impl Binary for i64 {
-  fn encode(x: &i64) -> Vec<u8> {
-    if *x < 0 {
-      return Binary::encode(&(((2 * -x) + 1) as u64))
-    } else {
-      return Binary::encode(&((2 * x) as u64))
-    }
-  }
-}
-
-fn encode_vector<T: Binary>(ts: &Vec<T>) -> Vec<u8> {
-  let mut v = Vec::new();
-  for t in ts {v.append(&mut Binary::encode(t));}
-  v
-}
-
-impl Binary for ElabStep {
-  fn encode(x: &ElabStep) -> Vec<u8> {
-    match x {
-      ElabStep::Orig(i, ls) => {
-        let mut v = vec!['o' as u8];
-        v.append(&mut Binary::encode(i));
-        v.append(&mut encode_vector(ls));
-        v.push(0);
-        v
-      },
-      ElabStep::Add(i, ls, is) => {
-        let mut v = vec!['a' as u8];
-        v.append(&mut Binary::encode(i));
-        v.append(&mut encode_vector(ls));
-        v.push(0);
-        v.push('l' as u8);
-        v.append(&mut encode_vector(is));
-        v.push(0);
-        v
-      },
-      ElabStep::Del(i) => {
-        let mut v = vec!['d' as u8];
-        v.append(&mut Binary::encode(i));
-        v.push(0);
-        v
-      }
-    }
-  }
-}
-
-fn elab(frat: File, temp: &mut File) -> io::Result<()> {
+fn elab(frat: File, temp: File) -> io::Result<()> {
+  let w = &mut BufWriter::new(temp);
   let mut bp = BackParser::new(frat)?.peekable();
   let mut cs: HashMap<u64, (bool, Clause)> = HashMap::new();
 
@@ -177,8 +123,7 @@ fn elab(frat: File, temp: &mut File) -> io::Result<()> {
 
       Step::Orig(i, ls) => {
         if cs.get(&i).unwrap().0 {  // If the original clause is active
-         temp.write(&Binary::encode(&ElabStep::Orig(i, ls)))
-           .expect("Failed to write orig step");
+          ElabStep::Orig(i, ls).write(w).expect("Failed to write orig step");
         }
         cs.remove(&i);
       }
@@ -198,9 +143,8 @@ fn elab(frat: File, temp: &mut File) -> io::Result<()> {
               propagate(v, ics)
             }
           };
-          undelete(&is, &mut cs, temp);
-          temp.write(&Binary::encode(&ElabStep::Add(i, ls, is)))
-            .expect("Failed to write add step");
+          undelete(&is, &mut cs, w);
+          ElabStep::Add(i, ls, is).write(w).expect("Failed to write add step");
         }
 
         cs.remove(&i);
@@ -343,8 +287,8 @@ fn main() -> io::Result<()> {
 
   let temp_path = format!("{}{}", frat_path, ".temp");
   let frat = File::open(frat_path)?;
-  let mut temp_write = File::create(temp_path.clone())?;
-  elab(frat, &mut temp_write)?;
+  let temp_write = File::create(temp_path.clone())?;
+  elab(frat, temp_write)?;
 
   let temp_read = File::open(temp_path)?;
   let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
