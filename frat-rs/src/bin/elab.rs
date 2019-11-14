@@ -39,15 +39,16 @@ struct IdCla<'a> {
   cla: & 'a Clause
 }
 
-fn propagate(ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>) -> Vec<u64> {
-  // v is the valuation obtained by negating all literals in the clause to be added
-  let mut v: HashMap<i64, Option<u64>> = ls.iter().map(|&x| (-x, None)).collect();
+fn propagate(ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>) ->
+    (HashMap<i64, Option<usize>>, Vec<u64>) {
+  // asn is the assignment obtained by negating all literals in the clause to be added
+  let mut asn: HashMap<i64, Option<usize>> = ls.iter().map(|&x| (-x, None)).collect();
   // ics is all the potentially vailable clauses (i.e., both active and passive)
   // against which v will be shown to be unsat
   let mut ics: Vec<IdCla> = active.iter()
     .map(|(&id, &(_marked, ref cla))| IdCla {id, _marked, used: false, cla})
     .collect();
-  let mut is: Vec<u64> = Vec::new();
+  let mut steps: Vec<u64> = Vec::new();
   'prop: loop {
 
     // Derive a new subunit clause and update all arguments accordingly.
@@ -60,24 +61,70 @@ fn propagate(ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>) -> Vec<u64> {
         let mut uf: Option<i64> = None;
 
         for &l in ic.cla {
-          if !v.contains_key(&-l) {
-            if uf.replace(l).is_some() {
-              continue 'ic
-            }
+          if !asn.contains_key(&-l) {
+            if uf.replace(l).is_some() {continue 'ic}
           }
         }
 
-        is.push(ic.id);
         ic.used = true;
         match uf {
-          None => return is,
-          Some(l) => {v.insert(l, Some(ic.id)); continue 'prop}
+          None => {
+            steps.push(ic.id);
+            return (asn, steps)
+          },
+          Some(l) => {
+            asn.insert(l, Some(steps.len()));
+            steps.push(ic.id);
+            continue 'prop
+          }
         }
       }
     }
 
     panic!("Unit progress stuck");
   }
+}
+
+fn propagate_hint(ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>, is: &Vec<u64>) ->
+    Option<(HashMap<i64, Option<usize>>, Vec<u64>)> {
+  let mut asn: HashMap<i64, Option<usize>> = ls.iter().map(|&x| (-x, None)).collect();
+  let mut steps: Vec<u64> = Vec::new();
+  for &c in is {
+    let mut uf: Option<i64> = None;
+    for &l in &active.get(&c)?.1 {
+      if !asn.contains_key(&-l) {
+        if uf.replace(l).is_some() {return None}
+      }
+    }
+    match uf {
+      None => {
+        steps.push(c);
+        return Some((asn, steps))
+      },
+      Some(l) => {
+        asn.insert(l, Some(steps.len()));
+        steps.push(c);
+      }
+    }
+  }
+  None
+}
+
+fn propagate_minimize(active: &HashMap<u64, (bool, Clause)>,
+    asn: HashMap<i64, Option<usize>>, steps: &mut Vec<u64>) {
+  let mut need = vec![false; steps.len()];
+  *need.last_mut().unwrap() = true;
+  for (i, s) in steps.iter().enumerate().rev() {
+    if need[i] {
+      for &l in &active[s].1 {
+        if let Some(&Some(j)) = asn.get(&-l) {
+          if j != i {need[j] = true}
+        }
+      }
+    }
+  }
+  let mut i = 0;
+  steps.retain(|_| (need[i], i += 1).0);
 }
 
 fn undelete<W: Write>(is: &Vec<u64>, cs: &mut HashMap<u64, (bool, Clause)>, w: &mut W) {
@@ -108,12 +155,13 @@ fn elab(frat: File, temp: File) -> io::Result<()> {
 
       Step::Add(i, ls, p) => {
         if active.remove(&i).unwrap().0 {
-          let is: Vec<u64> = match p {
-            Some(Proof::LRAT(is)) => is,
-            _ => propagate(&ls, &active)
-          };
-          undelete(&is, &mut active, w);
-          ElabStep::Add(i, ls, is).write(w).expect("Failed to write add step");
+          let (asn, mut steps) = match p {
+            Some(Proof::LRAT(is)) => propagate_hint(&ls, &active, &is),
+            _ => None
+          }.unwrap_or_else(|| propagate(&ls, &active));
+          propagate_minimize(&active, asn, &mut steps);
+          undelete(&steps, &mut active, w);
+          ElabStep::Add(i, ls, steps).write(w).expect("Failed to write add step");
         }
       },
       Step::Del(i, ls) => {
