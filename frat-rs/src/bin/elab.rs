@@ -64,40 +64,34 @@ fn clause_status(v: &Vec<i64>, c: &Clause) -> ClaSta {
   }
 }
 
-// Derive a new subunit clause and update all arguments accordingly.
-// Return true if a contradiction was found, false if a unit clause
-// was derived, and panic if neither
-fn propagate_once(is: &mut Vec<u64>, v: &mut Vec<i64>, ics: &mut Vec<IdCla>) -> bool {
-  for ic in ics {
-    if !ic.used { // Only consider clauses that have not been used for UP yet
-      match clause_status(v, ic.cla) {
-        ClaSta::Unsat => {
-          is.push(ic.id);
-          ic.used = true;
-          return true;
+fn propagate(mut v: Vec<i64>, mut ics: Vec<IdCla>) -> Vec<u64> {
+  let mut is: Vec<u64> = Vec::new();
+  'a: loop {
+
+    // Derive a new subunit clause and update all arguments accordingly.
+    // Return is if a contradiction was found, restart if a unit clause
+    // was derived, and panic if neither
+    for ic in &mut ics {
+      if !ic.used { // Only consider clauses that have not been used for UP yet
+        match clause_status(&v, ic.cla) {
+          ClaSta::Unsat => {
+            is.push(ic.id);
+            ic.used = true;
+            return is
+          }
+          ClaSta::Unit(l) => {
+            is.push(ic.id);
+            v.push(l);
+            ic.used = true;
+            continue 'a
+          }
+          ClaSta:: Plural => ()
         }
-        ClaSta::Unit(l) => {
-          is.push(ic.id);
-          v.push(l);
-          ic.used = true;
-          return false;
-        }
-        ClaSta:: Plural => ()
       }
     }
+
+    panic!("Unit progress stuck");
   }
-
-  panic!("Unit progress stuck");
-}
-
-fn propagate_core(mut is: Vec<u64>, mut v: Vec<i64>, mut cs: Vec<IdCla>) -> Vec<u64> {
-  if propagate_once(&mut is, &mut v, &mut cs) { is }
-  else { propagate_core(is, v, cs) }
-}
-
-fn propagate(v: Vec<i64>, cs: Vec<IdCla>) -> Vec<u64> {
-  let is: Vec<u64> = Vec::new();
-  propagate_core(is, v, cs)
 }
 
 fn undelete<W: Write>(is: &Vec<u64>, cs: &mut HashMap<u64, (bool, Clause)>, w: &mut W) {
