@@ -31,7 +31,14 @@ pub enum Step {
   Todo(u64),
 }
 
-pub struct BackParser {
+#[derive(Debug, Clone)]
+pub enum ElabStep {
+  Orig(u64, Vec<i64>),
+  Add(u64, Vec<i64>, Vec<u64>),
+  Del(u64),
+}
+
+struct BackParser {
   file: File,
   remaining: usize,
   pos: usize,
@@ -111,8 +118,12 @@ impl BackParser {
       return res
     }
   }
+}
 
-  fn next_segment(&mut self) -> Option<Segment> {
+impl Iterator for BackParser {
+  type Item = Segment;
+
+  fn next(&mut self) -> Option<Segment> {
     for b in 0.. {
       let buf: &[u8] = match self.buffers.get(b) {
         None => match self.read_chunk().expect("could not read from proof file") {
@@ -140,22 +151,58 @@ impl BackParser {
   }
 }
 
-impl Iterator for BackParser {
+pub struct StepParser(BackParser);
+
+impl StepParser {
+  pub fn new(file: File) -> io::Result<StepParser> {
+    Ok(StepParser(BackParser::new(file)?))
+  }
+}
+
+impl Iterator for StepParser {
   type Item = Step;
 
   fn next(&mut self) -> Option<Step> {
-    match self.next_segment() {
+    match self.0.next() {
       None => None,
       Some(Segment::Orig(idx, vec)) => Some(Step::Orig(idx, vec)),
       Some(Segment::Add(idx, vec)) => Some(Step::Add(idx, vec, None)),
       Some(Segment::Del(idx, vec)) => Some(Step::Del(idx, vec)),
       Some(Segment::Final(idx, vec)) => Some(Step::Final(idx, vec)),
-      Some(Segment::LProof(steps)) => match self.next_segment() {
+      Some(Segment::LProof(steps)) => match self.0.next() {
         Some(Segment::Add(idx, vec)) =>
           Some(Step::Add(idx, vec, Some(Proof::LRAT(steps)))),
         _ => panic!("'l' step not preceded by 'a' step")
       },
       Some(Segment::Todo(idx)) => Some(Step::Todo(idx)),
+    }
+  }
+}
+
+pub struct ElabStepParser(BackParser);
+
+impl ElabStepParser {
+  pub fn new(file: File) -> io::Result<ElabStepParser> {
+    Ok(ElabStepParser(BackParser::new(file)?))
+  }
+}
+
+impl Iterator for ElabStepParser {
+  type Item = ElabStep;
+
+  fn next(&mut self) -> Option<ElabStep> {
+    match self.0.next() {
+      None => None,
+      Some(Segment::Orig(idx, vec)) => Some(ElabStep::Orig(idx, vec)),
+      Some(Segment::Add(_, _)) => panic!("add step has no proof"),
+      Some(Segment::Del(idx, vec)) =>
+        {assert!(vec.is_empty()); Some(ElabStep::Del(idx))},
+      Some(Segment::LProof(steps)) => match self.0.next() {
+        Some(Segment::Add(idx, vec)) =>
+          Some(ElabStep::Add(idx, vec, steps)),
+        _ => panic!("'l' step not preceded by 'a' step")
+      },
+      Some(_) => self.next(),
     }
   }
 }

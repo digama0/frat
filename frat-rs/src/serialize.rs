@@ -1,6 +1,6 @@
 use arrayvec::ArrayVec;
 use std::io::{self, Write};
-use super::backparser::{Step, Proof};
+use super::backparser::{Step, ElabStep, Proof};
 
 pub trait Serialize {
   fn write<W: Write>(&self, w: &mut W) -> io::Result<()>;
@@ -60,6 +60,17 @@ impl Serialize for Step {
       Step::Del(idx, ref vec) => ('d', (idx, vec)).write(w),
       Step::Final(idx, ref vec) => ('f', (idx, vec)).write(w),
       Step::Todo(idx) => ('t', (idx, 0u8)).write(w),
+    }
+  }
+}
+
+impl Serialize for ElabStep {
+  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    match *self {
+      ElabStep::Orig(idx, ref vec) => ('o', (idx, vec)).write(w),
+      ElabStep::Add(idx, ref vec, ref steps) =>
+        (('a', (idx, vec)), ('l', steps)).write(w),
+      ElabStep::Del(idx) => ('d', (idx, 0u8)).write(w),
     }
   }
 }

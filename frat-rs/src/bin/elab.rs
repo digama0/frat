@@ -12,24 +12,6 @@ use backparser::*;
 use serialize::Serialize;
 use hashbrown::hash_map::HashMap;
 
-#[derive(Debug, Clone)]
-pub enum ElabStep {
-  Orig(u64, Vec<i64>),
-  Add(u64, Vec<i64>, Vec<u64>),
-  Del(u64),
-}
-
-impl Serialize for ElabStep {
-  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
-    match *self {
-      ElabStep::Orig(idx, ref vec) => ('o', (idx, vec)).write(w),
-      ElabStep::Add(idx, ref vec, ref steps) =>
-        (('a', (idx, vec)), ('l', steps)).write(w),
-      ElabStep::Del(idx) => ('d', (idx, 0u8)).write(w),
-    }
-  }
-}
-
 // #[derive(Copy, Clone, Debug)]
 struct IdCla<'a> {
   id: u64,
@@ -140,7 +122,7 @@ fn undelete<W: Write>(is: &Vec<u64>, cs: &mut HashMap<u64, (bool, Clause)>, w: &
 
 fn elab(frat: File, temp: File) -> io::Result<()> {
   let w = &mut BufWriter::new(temp);
-  let mut bp = BackParser::new(frat)?;
+  let mut bp = StepParser::new(frat)?;
   let mut active: HashMap<u64, (bool, Clause)> = HashMap::new();
 
   while let Some(s) = bp.next() {
@@ -184,17 +166,18 @@ fn elab(frat: File, temp: File) -> io::Result<()> {
 fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Result<()> {
   let mut k = cnf.len() as u64; // Counter for the last used ID
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
-  let mut bp = BackParser::new(temp)?;
+  let mut bp = ElabStepParser::new(temp)?.peekable();
 
   loop {
     match bp.next().expect("did not find empty clause") {
 
-      Step::Orig(i, ls) => {
+      ElabStep::Orig(i, ls) => {
         let j = cnf.iter().position(|x| is_perm(x, &ls)) // Find position of clause in original problem
           .expect("Orig step refers to nonexistent clause") as u64;
         assert!(m.insert(i, j + 1).is_none(), "Multiple orig steps with duplicate IDs");
-      },
-      Step::Add(i, ls, Some(Proof::LRAT(is))) => {
+      }
+
+      ElabStep::Add(i, ls, is) => {
         k += 1; // Get the next fresh ID
         m.insert(i, k); // The ID of added clause is mapped to a fresh ID
         let b = ls.is_empty();
@@ -208,15 +191,19 @@ fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io:
 
         if b {return Ok(())}
       }
-      Step::Del(i, ls) => {
-        assert!(ls.is_empty(), "Elaboration did not eliminate deletion literals");
-        let j = m.remove(&i).unwrap(); // Remove ID mapping to free space
-        write!(lrat, "{} d {} 0\n", k, j)?;
+
+      ElabStep::Del(i) => {
+        write!(lrat, "{} d {}", k, m.remove(&i).unwrap())?; // Remove ID mapping to free space
+        // agglomerate additional del steps into this block
+        while let Some(&ElabStep::Del(i)) = bp.peek() {
+          bp.next();
+          write!(lrat, " {}", m.remove(&i).unwrap())?
+        }
+        write!(lrat, " 0\n")?;
 
         // lrat.write(&Binary::encode(&ElabStep::Del(j)))
         //   .expect("Cannot write trimmed del step");
       }
-      _ => panic!("Bad elaboration result")
     }
   }
 }
