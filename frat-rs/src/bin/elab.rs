@@ -10,7 +10,7 @@ use std::env;
 use dimacs::parse_dimacs;
 use backparser::*;
 use serialize::Serialize;
-use hashbrown::hash_map::HashMap;
+use hashbrown::hash_map::{HashMap, Entry};
 
 // #[derive(Copy, Clone, Debug)]
 struct IdCla<'a> {
@@ -53,8 +53,8 @@ fn propagate(ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>) ->
             steps.push(ic.id);
             return (asn, steps)
           },
-          Some(l) => {
-            asn.insert(l, Some(steps.len()));
+          Some(l) => if let Entry::Vacant(v) = asn.entry(l) {
+            v.insert(Some(steps.len()));
             steps.push(ic.id);
             continue 'prop
           }
@@ -66,17 +66,17 @@ fn propagate(ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>) ->
   }
 }
 
-fn propagate_hint(i: u64, ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>, is: &Vec<u64>) ->
+fn propagate_hint(step: u64, ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>, is: &Vec<u64>) ->
     Option<(HashMap<i64, Option<usize>>, Vec<u64>)> {
   let mut asn: HashMap<i64, Option<usize>> = ls.iter().map(|&x| (-x, None)).collect();
   let mut steps: Vec<u64> = Vec::new();
   for &c in is {
     let mut uf: Option<i64> = None;
     for &l in &active.get(&c).unwrap_or_else(
-      || panic!("bad hint {}: clause {:?} does not exist", i, c)).1 {
+      || panic!("bad hint {}: clause {:?} does not exist", step, c)).1 {
       if !asn.contains_key(&-l) {
         assert!(uf.replace(l).is_none(),
-          "bad hint {}: clause {:?} is not unit", i, c);
+          "bad hint {}: clause {:?} is not unit", step, c);
       }
     }
     match uf {
@@ -84,13 +84,13 @@ fn propagate_hint(i: u64, ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>, 
         steps.push(c);
         return Some((asn, steps))
       },
-      Some(l) => {
-        asn.insert(l, Some(steps.len()));
+      Some(l) => if let Entry::Vacant(v) = asn.entry(l) {
+        v.insert(Some(steps.len()));
         steps.push(c);
       }
     }
   }
-  panic!("bad hint {}: unit propagation failed to find conflict", i)
+  panic!("bad hint {}: unit propagation failed to find conflict", step)
 }
 
 fn propagate_minimize(active: &HashMap<u64, (bool, Clause)>,
@@ -100,9 +100,7 @@ fn propagate_minimize(active: &HashMap<u64, (bool, Clause)>,
   for (i, s) in steps.iter().enumerate().rev() {
     if need[i] {
       for &l in &active[s].1 {
-        if let Some(&Some(j)) = asn.get(&-l) {
-          if j != i {need[j] = true}
-        }
+        if let Some(&Some(j)) = asn.get(&-l) {need[j] = true}
       }
     }
   }
@@ -126,7 +124,6 @@ fn elab(frat: File, temp: File) -> io::Result<()> {
   let mut active: HashMap<u64, (bool, Clause)> = HashMap::new();
 
   while let Some(s) = bp.next() {
-
     match s {
 
       Step::Orig(i, ls) => {
@@ -146,16 +143,19 @@ fn elab(frat: File, temp: File) -> io::Result<()> {
           undelete(&steps, &mut active, w);
           ElabStep::Add(i, ls, steps).write(w).expect("Failed to write add step");
         }
-      },
+      }
+
       Step::Del(i, ls) => {
         assert!(active.insert(i, (false, ls)).is_none(),
           "Encountered a delete step for preexisting clause");
-      },
+      }
+
       Step::Final(i, ls) => {
         // Identical to the Del case, except that the clause should be marked if empty
         assert!(active.insert(i, (ls.is_empty(), ls)).is_none(),
           "Encountered a delete step for preexisting clause");
       }
+
       Step::Todo(_) => ()
     }
   }
