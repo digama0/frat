@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::process::exit;
-use std::collections::HashMap;
+use hashbrown::hash_map::HashMap;
 use std::io;
 use super::backparser::*;
 
@@ -56,7 +56,7 @@ pub fn check_proof(proof: File) -> io::Result<()> {
                 for s in steps {
                   let needed = &mut active.get_mut(&s).expect("bad LRAT proof").0;
                   if !*needed {
-                    unimplemented!();
+                    // unimplemented!();
                     *needed = true;
                   }
                 }

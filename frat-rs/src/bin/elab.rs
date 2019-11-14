@@ -4,14 +4,13 @@
 #[path="../backparser.rs"] pub mod backparser;
 
 // use std::process::exit;
-// use std::collections::HashMap;
 use std::io::{self, Write, BufWriter};
 use std::fs::{File, read_to_string};
 use std::env;
 use dimacs::parse_dimacs;
 use backparser::*;
 use serialize::Serialize;
-use std::collections::HashMap;
+use hashbrown::hash_map::HashMap;
 
 #[derive(Debug, Clone)]
 pub enum ElabStep {
@@ -85,16 +84,17 @@ fn propagate(ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>) ->
   }
 }
 
-fn propagate_hint(ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>, is: &Vec<u64>) ->
+fn propagate_hint(i: u64, ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>, is: &Vec<u64>) ->
     Option<(HashMap<i64, Option<usize>>, Vec<u64>)> {
   let mut asn: HashMap<i64, Option<usize>> = ls.iter().map(|&x| (-x, None)).collect();
   let mut steps: Vec<u64> = Vec::new();
   for &c in is {
     let mut uf: Option<i64> = None;
-    for &l in &active.get(&c).expect("bad hint: clause does not exist").1 {
+    for &l in &active.get(&c).unwrap_or_else(
+      || panic!("bad hint {}: clause {:?} does not exist", i, c)).1 {
       if !asn.contains_key(&-l) {
         assert!(uf.replace(l).is_none(),
-          "bad hint: clause {:?} is not unit", c);
+          "bad hint {}: clause {:?} is not unit", i, c);
       }
     }
     match uf {
@@ -108,7 +108,7 @@ fn propagate_hint(ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>, is: &Vec
       }
     }
   }
-  panic!("bad hint: unit propagation failed to find conflict")
+  panic!("bad hint {}: unit propagation failed to find conflict", i)
 }
 
 fn propagate_minimize(active: &HashMap<u64, (bool, Clause)>,
@@ -157,7 +157,7 @@ fn elab(frat: File, temp: File) -> io::Result<()> {
       Step::Add(i, ls, p) => {
         if active.remove(&i).unwrap().0 {
           let (asn, mut steps) = match p {
-            Some(Proof::LRAT(is)) => propagate_hint(&ls, &active, &is),
+            Some(Proof::LRAT(is)) => propagate_hint(i, &ls, &active, &is),
             _ => None
           }.unwrap_or_else(|| propagate(&ls, &active));
           propagate_minimize(&active, asn, &mut steps);
@@ -298,7 +298,7 @@ fn main() -> io::Result<()> {
   let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
   eprintln!("trimming...");
   if let Some(p) = args.next() {
-    trim_bin(cnf, temp_read, &mut File::create(p)?)?;
+    trim_bin(cnf, temp_read, &mut BufWriter::new(File::create(p)?))?;
   } else {
     trim_bin(cnf, temp_read, &mut io::sink())?;
   }
