@@ -31,7 +31,7 @@ impl Serialize for ElabStep {
   }
 }
 
-// #[derive(Clone, Debug)]
+// #[derive(Copy, Clone, Debug)]
 struct IdCla<'a> {
   id: u64,
   _marked: bool,
@@ -39,7 +39,14 @@ struct IdCla<'a> {
   cla: & 'a Clause
 }
 
-fn propagate(mut v: Vec<i64>, mut ics: Vec<IdCla>) -> Vec<u64> {
+fn propagate(ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)>) -> Vec<u64> {
+  // v is the valuation obtained by negating all literals in the clause to be added
+  let mut v: HashMap<i64, Option<u64>> = ls.iter().map(|&x| (-x, None)).collect();
+  // ics is all the potentially vailable clauses (i.e., both active and passive)
+  // against which v will be shown to be unsat
+  let mut ics: Vec<IdCla> = active.iter()
+    .map(|(&id, &(_marked, ref cla))| IdCla {id, _marked, used: false, cla})
+    .collect();
   let mut is: Vec<u64> = Vec::new();
   'prop: loop {
 
@@ -53,7 +60,7 @@ fn propagate(mut v: Vec<i64>, mut ics: Vec<IdCla>) -> Vec<u64> {
         let mut uf: Option<i64> = None;
 
         for &l in ic.cla {
-          if !v.contains(&-l) {
+          if !v.contains_key(&-l) {
             if uf.replace(l).is_some() {
               continue 'ic
             }
@@ -64,7 +71,7 @@ fn propagate(mut v: Vec<i64>, mut ics: Vec<IdCla>) -> Vec<u64> {
         ic.used = true;
         match uf {
           None => return is,
-          Some(l) => {v.push(l); continue 'prop}
+          Some(l) => {v.insert(l, Some(ic.id)); continue 'prop}
         }
       }
     }
@@ -103,18 +110,7 @@ fn elab(frat: File, temp: File) -> io::Result<()> {
         if active.remove(&i).unwrap().0 {
           let is: Vec<u64> = match p {
             Some(Proof::LRAT(is)) => is,
-            _ => {
-              // v is the valuation obtained by negating all literals in the clause to be added
-              let v: Vec<i64> = ls.iter().map(|x| -x).collect();
-              // scs is all the potentially vailable clauses (i.e., both active and passive)
-              // against which v will be shown to be unsat
-
-              let ics: Vec<IdCla> = active.iter()
-                .map(|(&id, &(_marked, ref cla))| IdCla {id, _marked, used: false, cla})
-                .collect();
-              // js is the IDs of clauses used in showing v unsat
-              propagate(v, ics)
-            }
+            _ => propagate(&ls, &active)
           };
           undelete(&is, &mut active, w);
           ElabStep::Add(i, ls, is).write(w).expect("Failed to write add step");
