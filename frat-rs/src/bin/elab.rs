@@ -8,7 +8,6 @@
 use std::io::{self, Write, BufWriter};
 use std::fs::{File, read_to_string};
 use std::env;
-use std::convert::TryInto;
 use dimacs::parse_dimacs;
 use backparser::*;
 use serialize::Serialize;
@@ -53,9 +52,7 @@ fn clause_status(v: &Vec<i64>, c: &Clause) -> ClaSta {
 
   for l in c {
     if !v.contains(&-l) {
-      if uf == None {
-        uf = Some(*l);
-      } else {
+      if uf.replace(*l).is_some() {
         return ClaSta::Plural
       }
     }
@@ -93,7 +90,7 @@ fn propagate_once(is: &mut Vec<u64>, v: &mut Vec<i64>, ics: &mut Vec<IdCla>) -> 
   panic!("Unit progress stuck");
 }
 
-fn propagate_core(mut is: Vec<u64>, mut v: Vec<i64>, mut cs: Vec<(IdCla)>) -> Vec<u64> {
+fn propagate_core(mut is: Vec<u64>, mut v: Vec<i64>, mut cs: Vec<IdCla>) -> Vec<u64> {
   if propagate_once(&mut is, &mut v, &mut cs) { is }
   else { propagate_core(is, v, cs) }
 }
@@ -104,10 +101,11 @@ fn propagate(v: Vec<i64>, cs: Vec<IdCla>) -> Vec<u64> {
 }
 
 fn undelete<W: Write>(is: &Vec<u64>, cs: &mut HashMap<u64, (bool, Clause)>, w: &mut W) {
-  for i in is {
-    if ! cs.get(i).unwrap().0 { // If the necessary clause is not active yet
-      cs.get_mut(i).unwrap().0 = true; // Make it active
-      ElabStep::Del(*i).write(w).expect("Failed to write delete step");
+  for &i in is {
+    let v = cs.get_mut(&i).unwrap();
+    if !v.0 { // If the necessary clause is not active yet
+      v.0 = true; // Make it active
+      ElabStep::Del(i).write(w).expect("Failed to write delete step");
     }
   }
 }
@@ -115,103 +113,95 @@ fn undelete<W: Write>(is: &Vec<u64>, cs: &mut HashMap<u64, (bool, Clause)>, w: &
 fn elab(frat: File, temp: File) -> io::Result<()> {
   let w = &mut BufWriter::new(temp);
   let mut bp = BackParser::new(frat)?.peekable();
-  let mut cs: HashMap<u64, (bool, Clause)> = HashMap::new();
+  let mut active: HashMap<u64, (bool, Clause)> = HashMap::new();
 
   while let Some(s) = bp.next() {
 
     match s {
 
       Step::Orig(i, ls) => {
-        if cs.get(&i).unwrap().0 {  // If the original clause is active
+        if active.get(&i).unwrap().0 {  // If the original clause is active
           ElabStep::Orig(i, ls).write(w).expect("Failed to write orig step");
         }
-        cs.remove(&i);
+        active.remove(&i);
       }
 
       Step::Add(i, ls, p) => {
-        if cs.get(&i).unwrap().0 {
-          let is : Vec<u64> = match p {
+        if active.remove(&i).unwrap().0 {
+          let is: Vec<u64> = match p {
             Some(Proof::LRAT(is)) => is,
             _ => {
               // v is the valuation obtained by negating all literals in the clause to be added
-              let v : Vec<i64> = ls.iter().map(|x| -x).collect();
+              let v: Vec<i64> = ls.iter().map(|x| -x).collect();
               // scs is all the potentially vailable clauses (i.e., both active and passive)
               // against which v will be shown to be unsat
 
-              let ics : Vec<IdCla> = cs.iter().map(|x| IdCla {id: *x.0, _marked:(x.1).0, used: false, cla: &(x.1).1}).collect();
+              let ics: Vec<IdCla> = active.iter()
+                .map(|(&id, &(_marked, ref cla))| IdCla {id, _marked, used: false, cla})
+                .collect();
               // js is the IDs of clauses used in showing v unsat
               propagate(v, ics)
             }
           };
-          undelete(&is, &mut cs, w);
+          undelete(&is, &mut active, w);
           ElabStep::Add(i, ls, is).write(w).expect("Failed to write add step");
         }
-
-        cs.remove(&i);
       },
       Step::Del(i, ls) => {
-        assert_eq!(None, cs.insert(i, (false, ls)),
+        assert!(active.insert(i, (false, ls)).is_none(),
           "Encountered a delete step for preexisting clause");
       },
       Step::Final(i, ls) => {
         // Identical to the Del case, except that the clause should be marked if empty
-        assert_eq!(None, cs.insert(i, (ls.is_empty(), ls)),
+        assert!(active.insert(i, (ls.is_empty(), ls)).is_none(),
           "Encountered a delete step for preexisting clause");
       }
-      Step::Todo(_i) => ()
+      Step::Todo(_) => ()
     }
   }
 
   Ok(())
 }
 
-fn trim_bin(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut File) -> io::Result<()> {
-  let mut k: u64 = cnf.len().try_into().unwrap(); // Counter for the last used ID
+fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Result<()> {
+  let mut k = cnf.len() as u64; // Counter for the last used ID
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
-  let mut bp = BackParser::new(temp)?.peekable();
+  let mut bp = BackParser::new(temp)?;
 
-  while let Some(s) = bp.next() {
-
-    match s {
+  loop {
+    match bp.next().expect("did not find empty clause") {
 
       Step::Orig(i, ls) => {
-        assert!(!m.contains_key(&i), "Multiple orig steps with duplicate IDs");
-        let j: u64 = cnf.iter().position(|x| is_perm(x, &ls)) // Find position of clause in original problem
-           .expect("Orig steps refers to nonexistent clause").try_into().unwrap();
-        m.insert(i, j + 1);
+        let j = cnf.iter().position(|x| is_perm(x, &ls)) // Find position of clause in original problem
+          .expect("Orig steps refers to nonexistent clause") as u64;
+        assert!(m.insert(i, j + 1).is_none(), "Multiple orig steps with duplicate IDs");
       },
       Step::Add(i, ls, Some(Proof::LRAT(is))) => {
         k += 1; // Get the next fresh ID
         m.insert(i, k); // The ID of added clause is mapped to a fresh ID
         let b = ls.is_empty();
-        let js: Vec<u64> = is.iter().map(|x| m.get(x).unwrap().clone()).collect();
+        let js: Vec<u64> = is.iter().map(|x| m[x].clone()).collect();
         // lrat.write(&Binary::encode(&ElabStep::Add(j, ls, js)))
-        //   .expect("Cannot write trim_binmed add step");
-        lrat.write(k.to_string().as_bytes())?;
-        lrat.write(ls.into_iter().map(|x| format!(" {}", x.to_string())).collect::<String>().as_bytes())?;
-        lrat.write(" 0".as_bytes())?;
-        lrat.write(js.into_iter().map(|x| format!(" {}", x.to_string())).collect::<String>().as_bytes())?;
-        lrat.write(" 0\n".as_bytes())?;
+        //   .expect("Cannot write trimmed add step");
+        write!(lrat, "{}", k)?;
+        for x in ls { write!(lrat, " {}", x)? }
+        write!(lrat, " 0")?;
+        for x in js { write!(lrat, " {}", x)? }
+        write!(lrat, " 0\n")?;
 
         if b {return Ok(())}
       }
       Step::Del(i, ls) => {
         assert!(ls.is_empty(), "Elaboration did not eliminate deletion literals");
-        let j = m.get(&i).unwrap().clone();
+        let j = m.remove(&i).unwrap(); // Remove ID mapping to free space
+        write!(lrat, "{} d {} 0\n", k, j)?;
 
-        lrat.write(k.to_string().as_bytes())?;
-        lrat.write(" d ".as_bytes())?;
-        lrat.write(j.to_string().as_bytes())?;
-        lrat.write(" 0\n".as_bytes())?;
-
-        m.remove(&i); // Remove ID mapping to free space
         // lrat.write(&Binary::encode(&ElabStep::Del(j)))
-        //   .expect("Cannot write trim_binmed del step");
+        //   .expect("Cannot write trimmed del step");
       }
       _ => panic!("Bad elaboration result")
     }
   }
-  Ok(())
 }
 
 // fn calc_lrat(p: Vec<dimacs::Clause>, ls: Vec<Lstep>) -> Vec<Lstep> {
@@ -223,11 +213,7 @@ fn trim_bin(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut File) -> io::Result
 // }
 
 fn is_perm(v: &Vec<i64>, w: &Vec<i64>) -> bool {
-  if v.len() != w.len() { return false }
-  for i in v {
-    if !w.contains(i) { return false }
-  }
-  true
+  v.len() == w.len() && v.iter().all(|i| w.contains(i))
 }
 
 // fn calc_id_map(p: Vec<dimacs::Clause>, mut k: u64, lns: &Vec<Lstep>, m: &mut Vec<(u64, u64)>) {
@@ -283,16 +269,19 @@ fn main() -> io::Result<()> {
   let mut args = env::args().skip(1);
   let dimacs = args.next().expect("missing input file");
   let frat_path = args.next().expect("missing proof file");
-  let mut lrat = File::create(args.next().expect("missing output path"))?;
 
-  let temp_path = format!("{}{}", frat_path, ".temp");
+  let temp_path = format!("{}.temp", frat_path);
   let frat = File::open(frat_path)?;
-  let temp_write = File::create(temp_path.clone())?;
+  let temp_write = File::create(&temp_path)?;
   elab(frat, temp_write)?;
 
   let temp_read = File::open(temp_path)?;
   let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
-  trim_bin(cnf, temp_read, &mut lrat)?;
+  if let Some(p) = args.next() {
+    trim_bin(cnf, temp_read, &mut File::create(p)?)?;
+  } else {
+    trim_bin(cnf, temp_read, &mut io::sink())?;
+  }
 
   Ok(())
 }
