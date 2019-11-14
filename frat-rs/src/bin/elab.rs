@@ -31,13 +31,6 @@ impl Serialize for ElabStep {
   }
 }
 
-// Type used to represent the status of a clause under a specific variable assigntment.
-pub enum ClaSta {
-  Unsat,
-  Unit(i64),
-  Plural
-}
-
 // #[derive(Clone, Debug)]
 struct IdCla<'a> {
   id: u64,
@@ -46,46 +39,32 @@ struct IdCla<'a> {
   cla: & 'a Clause
 }
 
-fn clause_status(v: &Vec<i64>, c: &Clause) -> ClaSta {
-  // 'uf' holds an unfalsified literal of the clause, if one has been found
-  let mut uf: Option<i64> = None;
-
-  for l in c {
-    if !v.contains(&-l) {
-      if uf.replace(*l).is_some() {
-        return ClaSta::Plural
-      }
-    }
-  }
-
-  match uf {
-    None => ClaSta::Unsat,
-    Some(l) => ClaSta::Unit(l)
-  }
-}
-
 fn propagate(mut v: Vec<i64>, mut ics: Vec<IdCla>) -> Vec<u64> {
   let mut is: Vec<u64> = Vec::new();
-  'a: loop {
+  'prop: loop {
 
     // Derive a new subunit clause and update all arguments accordingly.
     // Return is if a contradiction was found, restart if a unit clause
     // was derived, and panic if neither
-    for ic in &mut ics {
+    'ic: for ic in &mut ics {
       if !ic.used { // Only consider clauses that have not been used for UP yet
-        match clause_status(&v, ic.cla) {
-          ClaSta::Unsat => {
-            is.push(ic.id);
-            ic.used = true;
-            return is
+
+        // 'uf' holds an unfalsified literal of the clause, if one has been found
+        let mut uf: Option<i64> = None;
+
+        for &l in ic.cla {
+          if !v.contains(&-l) {
+            if uf.replace(l).is_some() {
+              continue 'ic
+            }
           }
-          ClaSta::Unit(l) => {
-            is.push(ic.id);
-            v.push(l);
-            ic.used = true;
-            continue 'a
-          }
-          ClaSta:: Plural => ()
+        }
+
+        is.push(ic.id);
+        ic.used = true;
+        match uf {
+          None => return is,
+          Some(l) => {v.push(l); continue 'prop}
         }
       }
     }
