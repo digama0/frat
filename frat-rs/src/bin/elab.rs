@@ -173,8 +173,12 @@ fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io:
 
       ElabStep::Orig(i, ls) => {
         let j = cnf.iter().position(|x| is_perm(x, &ls)) // Find position of clause in original problem
-          .expect("Orig step refers to nonexistent clause") as u64;
-        assert!(m.insert(i, j + 1).is_none(), "Multiple orig steps with duplicate IDs");
+          .expect("Orig step refers to nonexistent clause") as u64 + 1;
+        assert!(m.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
+        if ls.is_empty() {
+          write!(lrat, "{} 0 {} 0\n", k+1, j)?;
+          return Ok(())
+        }
       }
 
       ElabStep::Add(i, ls, is) => {

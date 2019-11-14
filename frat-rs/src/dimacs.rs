@@ -3,7 +3,6 @@ use std::rc::Rc;
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Token {
 	Nat(i64),
-	Zero,
 	Ident(Ident)
 }
 
@@ -99,9 +98,7 @@ impl<I> Iterator for Lexer<I> where I: Iterator<Item=char> {
         Comment => self.next(),
         tk => Some(Ident(tk))
       },
-      '1'..='9' => Some(Nat(self.scan_nat())),
-
-      '0' => { self.bump(); Some(Zero) },
+      '0'..='9' => Some(Nat(self.scan_nat())),
       '-' => { self.bump(); Some(Nat(-self.scan_nat())) },
       _ => panic!("invalid token start")
     }
@@ -118,8 +115,8 @@ pub fn parse_dimacs<I: Iterator<Item=char>>(input: I) -> (usize, Vec<Clause>) {
         let mut clause = Vec::new();
         loop {
           match lex.next() {
+            Some(Nat(0)) => break,
             Some(Nat(lit)) => clause.push(lit),
-            Some(Zero) => break,
             None => return (vars as usize, fmla),
             _ => panic!("parse DIMACS failed")
           }
