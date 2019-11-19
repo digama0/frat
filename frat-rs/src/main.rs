@@ -1,6 +1,6 @@
 pub mod dimacs;
 mod parser;
-mod backparser;
+pub mod backparser;
 mod lratchk;
 mod serialize;
 

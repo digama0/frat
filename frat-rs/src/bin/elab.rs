@@ -145,6 +145,13 @@ fn elab(frat: File, temp: File) -> io::Result<()> {
         }
       }
 
+      Step::Reloc(from, to) => {
+        if let Some(s) = active.remove(&to) {
+          assert!(active.insert(from, s).is_none(),
+            "Finalized a step that has been relocated");
+        }
+      }
+
       Step::Del(i, ls) => {
         assert!(active.insert(i, (false, ls)).is_none(),
           "Encountered a delete step for preexisting clause");
@@ -195,6 +202,8 @@ fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io:
 
         if b {return Ok(())}
       }
+
+      ElabStep::Reloc(from, to) => if let Some(s) = m.remove(&from) { m.insert(to, s); },
 
       ElabStep::Del(i) => {
         write!(lrat, "{} d {}", k, m.remove(&i).unwrap())?; // Remove ID mapping to free space

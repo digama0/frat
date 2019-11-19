@@ -16,7 +16,7 @@ fn check_proof_step(_active: &mut HashMap<u64, (bool, Clause)>, _cl: &Clause, p:
 }
 
 pub fn check_proof(proof: File) -> io::Result<()> {
-  let mut bp = BackParser::new(proof)?.peekable();
+  let mut bp = StepParser::new(proof)?.peekable();
   let (mut orig, mut added, mut deleted, mut fin) = (0i64, 0i64, 0i64, 0i64);
   let (mut dirty_orig, mut dirty_add, mut double_del, mut double_fin) = (0i64, 0i64, 0i64, 0i64);
   let mut missing = 0i64;
@@ -65,6 +65,17 @@ pub fn check_proof(proof: File) -> io::Result<()> {
               eprintln!("bad proof for {:?}", lits);
               bad = true;
             }
+          }
+        } else {
+          dirty_add += 1;
+          // eprintln!("added clause {} {:?} never finalized", i, lits);
+        }
+      },
+      Step::Reloc(from, to) => {
+        if let Some(s) = active.remove(&to) {
+          if active.insert(from, s).is_some() {
+            double_del += 1;
+            // eprintln!("already deleted clause {} {:?}", i, active[&i]);
           }
         } else {
           dirty_add += 1;
