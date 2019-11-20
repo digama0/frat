@@ -118,12 +118,13 @@ fn undelete<W: Write>(is: &Vec<u64>, cs: &mut HashMap<u64, (bool, Clause)>, w: &
   }
 }
 
-fn elab(frat: File, temp: File) -> io::Result<()> {
+fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
   let w = &mut BufWriter::new(temp);
-  let mut bp = StepParser::new(frat)?;
+  let mut bp = StepParser::<M>::new(frat)?;
   let mut active: HashMap<u64, (bool, Clause)> = HashMap::new();
 
   while let Some(s) = bp.next() {
+    eprintln!("{:?}", s);
     match s {
 
       Step::Orig(i, ls) => {
@@ -173,7 +174,7 @@ fn elab(frat: File, temp: File) -> io::Result<()> {
 fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Result<()> {
   let mut k = cnf.len() as u64; // Counter for the last used ID
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
-  let mut bp = ElabStepParser::new(temp)?.peekable();
+  let mut bp = ElabStepParser::<Bin>::new(temp)?.peekable();
 
   loop {
     match bp.next().expect("did not find empty clause") {
@@ -288,10 +289,12 @@ fn main() -> io::Result<()> {
   let frat_path = args.next().expect("missing proof file");
 
   let temp_path = format!("{}.temp", frat_path);
-  let frat = File::open(frat_path)?;
+  let mut frat = File::open(frat_path)?;
+  let bin = detect_binary(&mut frat)?;
   let temp_write = File::create(&temp_path)?;
   eprintln!("elaborating...");
-  elab(frat, temp_write)?;
+  if bin { elab::<Bin>(frat, temp_write)? }
+  else { elab::<Ascii>(frat, temp_write)? };
   eprintln!("parsing DIMACS...");
 
   let temp_read = File::open(temp_path)?;

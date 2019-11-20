@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
+use std::marker::PhantomData;
 use super::parser::*;
 
 const BUFFER_SIZE: usize = 0x4000;
@@ -41,17 +42,18 @@ pub enum ElabStep {
   Del(u64),
 }
 
-struct BackParser {
+struct BackParser<M> {
   file: File,
   remaining: usize,
   pos: usize,
   last_read: usize,
   buffers: Vec<Box<[u8]>>,
   free: Vec<Box<[u8]>>,
+  _marker: PhantomData<M>,
 }
 
-impl BackParser {
-  pub fn new(mut file: File) -> io::Result<BackParser> {
+impl<M> BackParser<M> {
+  pub fn new(mut file: File) -> io::Result<BackParser<M>> {
     let len = file.metadata()?.len() as usize;
     let pos = len % BUFFER_SIZE;
     file.seek(SeekFrom::End(-(pos as i64)))?;
@@ -63,7 +65,8 @@ impl BackParser {
       pos,
       last_read: pos,
       buffers: vec![buf],
-      free: Vec::new()
+      free: Vec::new(),
+      _marker: PhantomData
     })
   }
 
@@ -76,7 +79,80 @@ impl BackParser {
     self.remaining -= 1;
     Ok(Some(buf))
   }
+}
 
+pub trait Mode {
+  const OFFSET: usize;
+  fn back_scan(c: u8) -> bool;
+  fn keyword<I: Iterator<Item=u8>>(it: &mut I) -> Option<u8> { it.next() }
+  fn unum<I: Iterator<Item=u8>>(it: &mut I) -> Option<u64>;
+  fn num<I: Iterator<Item=u8>>(it: &mut I) -> Option<i64>;
+
+  fn uvec<I: Iterator<Item=u8>>(it: &mut I) -> Vec<u64> {
+    let mut vec = Vec::new();
+    loop { match Self::unum(it).expect("bad step") {
+      0 => return vec,
+      i => vec.push(i)
+    } }
+  }
+
+  fn ivec<I: Iterator<Item=u8>>(it: &mut I) -> Clause {
+    let mut vec = Vec::new();
+    loop { match Self::num(it).expect("bad step") {
+      0 => return vec,
+      i => vec.push(i)
+    } }
+  }
+}
+
+pub struct Bin;
+pub struct Ascii;
+
+impl Mode for Bin {
+  const OFFSET: usize = 1;
+  fn back_scan(c: u8) -> bool { c == 0 }
+  fn unum<I: Iterator<Item=u8>>(it: &mut I) -> Option<u64> { parse_unum(it) }
+  fn num<I: Iterator<Item=u8>>(it: &mut I) -> Option<i64> { parse_num(it) }
+}
+impl Ascii {
+  fn spaces<I: Iterator<Item=u8>>(it: &mut I) -> Option<u8> {
+    loop { match it.next() {
+      Some(c) if c == (' ' as u8) || c == ('\n' as u8) || c == ('\r' as u8) => {},
+      o => return o
+    } }
+  }
+  fn initial_neg<I: Iterator<Item=u8>>(it: &mut I) -> (bool, Option<u8>) {
+    match Ascii::spaces(it) {
+      Some(c) if c == ('-' as u8) => (true, it.next()),
+      o => (false, o)
+    }
+  }
+
+  fn parse_num<I: Iterator<Item=u8>>(peek: Option<u8>, it: &mut I) -> Option<u64> {
+    let mut val = (peek? as char).to_digit(10).unwrap() as u64;
+		while let Some(parsed) = it.next().and_then(|c| (c as char).to_digit(10)) {
+			val *= 10;
+      val += parsed as u64;
+    }
+		Some(val)
+  }
+
+}
+impl Mode for Ascii {
+  const OFFSET: usize = 0;
+  fn back_scan(c: u8) -> bool { c > ('9' as u8) }
+  fn keyword<I: Iterator<Item=u8>>(it: &mut I) -> Option<u8> { Ascii::spaces(it) }
+  fn unum<I: Iterator<Item=u8>>(it: &mut I) -> Option<u64> {
+    Ascii::parse_num(Ascii::spaces(it), it)
+  }
+  fn num<I: Iterator<Item=u8>>(it: &mut I) -> Option<i64> {
+    let (neg, peek) = Ascii::initial_neg(it);
+    let val = Ascii::parse_num(peek, it)?;
+    Some(if neg { -(val as i64) } else { val as i64 })
+  }
+}
+
+impl<M: Mode> BackParser<M> {
   fn parse_segment<I: Iterator<Item=u8>>(mut it: I) -> Segment {
     const A: u8 = 'a' as u8;
     const D: u8 = 'd' as u8;
@@ -85,24 +161,14 @@ impl BackParser {
     const L: u8 = 'l' as u8;
     const R: u8 = 'r' as u8;
     const T: u8 = 't' as u8;
-    fn mk_uvec<I: Iterator<Item=u8>>(it: &mut I) -> Vec<u64> {
-      let mut vec = Vec::new();
-      loop { match parse_unum(it).expect("bad step") {
-        0 => return vec,
-        i => vec.push(i) } } }
-    fn mk_ivec<I: Iterator<Item=u8>>(it: &mut I) -> Clause {
-      let mut vec = Vec::new();
-      loop { match parse_num(it).expect("bad step") {
-        0 => return vec,
-        i => vec.push(i) } } }
-    match it.next() {
-      Some(A) => Segment::Add(parse_unum(&mut it).unwrap(), mk_ivec(&mut it)),
-      Some(D) => Segment::Del(parse_unum(&mut it).unwrap(), mk_ivec(&mut it)),
-      Some(F) => Segment::Final(parse_unum(&mut it).unwrap(), mk_ivec(&mut it)),
-      Some(L) => Segment::LProof(mk_uvec(&mut it)),
-      Some(O) => Segment::Orig(parse_unum(&mut it).unwrap(), mk_ivec(&mut it)),
-      Some(R) => Segment::Reloc(parse_unum(&mut it).unwrap(), parse_unum(&mut it).unwrap()),
-      Some(T) => Segment::Todo(parse_unum(&mut it).unwrap()),
+    match M::keyword(&mut it) {
+      Some(A) => Segment::Add(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
+      Some(D) => Segment::Del(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
+      Some(F) => Segment::Final(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
+      Some(L) => Segment::LProof(M::uvec(&mut it)),
+      Some(O) => Segment::Orig(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
+      Some(R) => Segment::Reloc(M::unum(&mut it).unwrap(), M::unum(&mut it).unwrap()),
+      Some(T) => Segment::Todo(M::unum(&mut it).unwrap()),
       Some(k) => panic!("bad step {:?}", k as char),
       None => panic!("bad step None"),
     }
@@ -110,11 +176,11 @@ impl BackParser {
 
   fn parse_segment_from(&mut self, b: usize, i: usize) -> Segment {
     if b == 0 {
-      let res = BackParser::parse_segment(self.buffers[0][i..self.pos].iter().copied());
+      let res = BackParser::<M>::parse_segment(self.buffers[0][i..self.pos].iter().copied());
       self.pos = i;
       return res
     } else {
-      let res = BackParser::parse_segment(
+      let res = BackParser::<M>::parse_segment(
         self.buffers[b][i..].iter()
           .chain(self.buffers[1..b].iter().rev().flat_map(|buf| buf.iter()))
           .chain(self.buffers[0][..self.pos].iter()).copied());
@@ -125,7 +191,7 @@ impl BackParser {
   }
 }
 
-impl Iterator for BackParser {
+impl<M: Mode> Iterator for BackParser<M> {
   type Item = Segment;
 
   fn next(&mut self) -> Option<Segment> {
@@ -143,12 +209,12 @@ impl Iterator for BackParser {
       if b == 0 {
         if self.pos != 0 {
           for i in (0..self.pos-1).rev() {
-            if buf[i] == 0 { return Some(self.parse_segment_from(b, i+1)) }
+            if M::back_scan(buf[i]) { return Some(self.parse_segment_from(b, i + M::OFFSET)) }
           }
         }
       } else {
         for (i, &v) in buf.iter().enumerate().rev() {
-          if v == 0 { return Some(self.parse_segment_from(b, i+1)) }
+          if M::back_scan(v) { return Some(self.parse_segment_from(b, i + M::OFFSET)) }
         }
       }
     }
@@ -156,15 +222,15 @@ impl Iterator for BackParser {
   }
 }
 
-pub struct StepParser(BackParser);
+pub struct StepParser<M>(BackParser<M>);
 
-impl StepParser {
-  pub fn new(file: File) -> io::Result<StepParser> {
+impl<M> StepParser<M> {
+  pub fn new(file: File) -> io::Result<StepParser<M>> {
     Ok(StepParser(BackParser::new(file)?))
   }
 }
 
-impl Iterator for StepParser {
+impl<M: Mode> Iterator for StepParser<M> {
   type Item = Step;
 
   fn next(&mut self) -> Option<Step> {
@@ -185,15 +251,15 @@ impl Iterator for StepParser {
   }
 }
 
-pub struct ElabStepParser(BackParser);
+pub struct ElabStepParser<M>(BackParser<M>);
 
-impl ElabStepParser {
-  pub fn new(file: File) -> io::Result<ElabStepParser> {
+impl<M> ElabStepParser<M> {
+  pub fn new(file: File) -> io::Result<ElabStepParser<M>> {
     Ok(ElabStepParser(BackParser::new(file)?))
   }
 }
 
-impl Iterator for ElabStepParser {
+impl<M: Mode> Iterator for ElabStepParser<M> {
   type Item = ElabStep;
 
   fn next(&mut self) -> Option<ElabStep> {
@@ -212,4 +278,10 @@ impl Iterator for ElabStepParser {
       Some(_) => self.next(),
     }
   }
+}
+
+pub fn detect_binary(f: &mut File) -> io::Result<bool> {
+  let mut buf = [0u8; 2];
+  let i = f.read(&mut buf)?;
+  Ok(i == 2 && !(buf[0] == (' ' as u8) || buf[1] == (' ' as u8)))
 }
