@@ -70,15 +70,21 @@ fn propagate_hint(step: u64, ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)
     Option<(HashMap<i64, Option<usize>>, Vec<u64>)> {
   let mut asn: HashMap<i64, Option<usize>> = ls.iter().map(|&x| (-x, None)).collect();
   let mut steps: Vec<u64> = Vec::new();
-  for &c in is {
+  let mut first = 0;
+  let mut progress = false;
+  loop {
+    'a: for i in first..is.len() {
+      let c = is[i];
       let mut uf: Option<i64> = None;
       for &l in &active.get(&c).unwrap_or_else(
         || panic!("bad hint {}: clause {:?} does not exist", step, c)).1 {
         if !asn.contains_key(&-l) {
-        assert!(uf.replace(l).is_none(),
-          "bad hint {}: clause {:?} is not unit", step, c);
+          if uf.replace(l).is_some() {
+            // eprintln!("bad hint {}: clause {:?} is not unit", step, c);
+            continue 'a
           }
         }
+      }
       match uf {
         None => {
           steps.push(c);
@@ -89,9 +95,13 @@ fn propagate_hint(step: u64, ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)
           steps.push(c);
         }
       }
+      progress = true;
+      if first == i { first += 1 }
     }
-  panic!("bad hint {}: unit propagation failed to find conflict", step)
+    assert!(progress,
+      "bad hint {}: unit propagation failed to find conflict", step)
   }
+}
 
 fn propagate_minimize(active: &HashMap<u64, (bool, Clause)>,
     asn: HashMap<i64, Option<usize>>, steps: &mut Vec<u64>) {
