@@ -71,8 +71,8 @@ fn propagate_hint(step: u64, ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)
   let mut asn: HashMap<i64, Option<usize>> = ls.iter().map(|&x| (-x, None)).collect();
   let mut steps: Vec<u64> = Vec::new();
   let mut first = 0;
-  let mut progress = false;
   loop {
+    let mut progress = false;
     'a: for i in first..is.len() {
       let c = is[i];
       let mut uf: Option<i64> = None;
