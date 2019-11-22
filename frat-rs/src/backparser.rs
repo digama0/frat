@@ -281,7 +281,8 @@ impl<M: Mode> Iterator for ElabStepParser<M> {
 }
 
 pub fn detect_binary(f: &mut File) -> io::Result<bool> {
-  let mut buf = [0u8; 2];
-  let i = f.read(&mut buf)?;
-  Ok(i == 2 && !(buf[0] == (' ' as u8) || buf[1] == (' ' as u8)))
+  if let Err(_) = f.seek(SeekFrom::End(-1)) { return Ok(false) }
+  let mut c = [0u8; 1];
+  f.read_exact(&mut c)?;
+  Ok(c[0] == 0)
 }
