@@ -71,15 +71,19 @@ pub fn check_proof<M: Mode>(proof: File) -> io::Result<()> {
           // eprintln!("added clause {} {:?} never finalized", i, lits);
         }
       },
-      Step::Reloc(from, to) => {
-        if let Some(s) = active.remove(&to) {
-          if active.insert(from, s).is_some() {
-            double_del += 1;
-            // eprintln!("already deleted clause {} {:?}", i, active[&i]);
+      Step::Reloc(relocs) => {
+        let removed: Vec<_> = relocs.iter()
+          .map(|(from, to)| (*from, active.remove(to))).collect();
+        for (from, o) in removed {
+          if let Some(s) = o {
+            if active.insert(from, s).is_some() {
+              double_del += 1;
+              // eprintln!("already deleted clause {} {:?}", i, active[&i]);
+            }
+          } else {
+            dirty_add += 1;
+            // eprintln!("added clause {} {:?} never finalized", i, lits);
           }
-        } else {
-          dirty_add += 1;
-          // eprintln!("added clause {} {:?} never finalized", i, lits);
         }
       },
       Step::Del(i, lits) => {

@@ -12,7 +12,7 @@ enum Segment {
   Orig(u64, Clause),
   Add(u64, Clause),
   LProof(Vec<u64>),
-  Reloc(u64, u64),
+  Reloc(Vec<(u64, u64)>),
   Del(u64, Clause),
   Final(u64, Clause),
   Todo(u64),
@@ -29,7 +29,7 @@ pub enum Step {
   Orig(u64, Clause),
   Add(u64, Clause, Option<Proof>),
   Del(u64, Clause),
-  Reloc(u64, u64),
+  Reloc(Vec<(u64, u64)>),
   Final(u64, Clause),
   Todo(u64),
 }
@@ -38,7 +38,7 @@ pub enum Step {
 pub enum ElabStep {
   Orig(u64, Vec<i64>),
   Add(u64, Vec<i64>, Vec<u64>),
-  Reloc(u64, u64),
+  Reloc(Vec<(u64, u64)>),
   Del(u64),
 }
 
@@ -102,6 +102,19 @@ pub trait Mode {
       0 => return vec,
       i => vec.push(i)
     } }
+  }
+
+  fn uvec2<I: Iterator<Item=u8>>(it: &mut I) -> Vec<(u64, u64)> {
+    let mut vec = Vec::new();
+    loop {
+      match Self::unum(it).expect("bad step") {
+        0 => return vec,
+        i => vec.push((i, match Self::unum(it) {
+          Some(j) if j != 0 => j,
+          _ => panic!("odd relocation")
+        }))
+      }
+    }
   }
 }
 
@@ -167,7 +180,7 @@ impl<M: Mode> BackParser<M> {
       Some(F) => Segment::Final(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
       Some(L) => Segment::LProof(M::uvec(&mut it)),
       Some(O) => Segment::Orig(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
-      Some(R) => Segment::Reloc(M::unum(&mut it).unwrap(), M::unum(&mut it).unwrap()),
+      Some(R) => Segment::Reloc(M::uvec2(&mut it)),
       Some(T) => Segment::Todo(M::unum(&mut it).unwrap()),
       Some(k) => panic!("bad step {:?}", k as char),
       None => panic!("bad step None"),
@@ -239,7 +252,7 @@ impl<M: Mode> Iterator for StepParser<M> {
       Some(Segment::Orig(idx, vec)) => Some(Step::Orig(idx, vec)),
       Some(Segment::Add(idx, vec)) => Some(Step::Add(idx, vec, None)),
       Some(Segment::Del(idx, vec)) => Some(Step::Del(idx, vec)),
-      Some(Segment::Reloc(from, to)) => Some(Step::Reloc(from, to)),
+      Some(Segment::Reloc(relocs)) => Some(Step::Reloc(relocs)),
       Some(Segment::Final(idx, vec)) => Some(Step::Final(idx, vec)),
       Some(Segment::LProof(steps)) => match self.0.next() {
         Some(Segment::Add(idx, vec)) =>
@@ -269,7 +282,7 @@ impl<M: Mode> Iterator for ElabStepParser<M> {
       Some(Segment::Add(_, _)) => panic!("add step has no proof"),
       Some(Segment::Del(idx, vec)) =>
         {assert!(vec.is_empty()); Some(ElabStep::Del(idx))},
-      Some(Segment::Reloc(from, to)) => Some(ElabStep::Reloc(from, to)),
+      Some(Segment::Reloc(relocs)) => Some(ElabStep::Reloc(relocs)),
       Some(Segment::LProof(steps)) => match self.0.next() {
         Some(Segment::Add(idx, vec)) =>
           Some(ElabStep::Add(idx, vec, steps)),

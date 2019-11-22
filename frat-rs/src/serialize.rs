@@ -57,7 +57,7 @@ impl Serialize for Step {
         (('t', (127u8, 0u8)), ('a', (idx, vec))).write(w),
       Step::Add(idx, ref vec, Some(Proof::LRAT(ref steps))) =>
         (('a', (idx, vec)), ('l', steps)).write(w),
-      Step::Reloc(from, to) => ('r', (from, (to, 0u8))).write(w),
+      Step::Reloc(ref relocs) => ('r', relocs).write(w),
       Step::Del(idx, ref vec) => ('d', (idx, vec)).write(w),
       Step::Final(idx, ref vec) => ('f', (idx, vec)).write(w),
       Step::Todo(idx) => ('t', (idx, 0u8)).write(w),
@@ -71,7 +71,7 @@ impl Serialize for ElabStep {
       ElabStep::Orig(idx, ref vec) => ('o', (idx, vec)).write(w),
       ElabStep::Add(idx, ref vec, ref steps) =>
         (('a', (idx, vec)), ('l', steps)).write(w),
-      ElabStep::Reloc(from, to) => ('r', (from, (to, 0u8))).write(w),
+      ElabStep::Reloc(ref relocs) => ('r', relocs).write(w),
       ElabStep::Del(idx) => ('d', (idx, 0u8)).write(w),
     }
   }

@@ -71,27 +71,27 @@ fn propagate_hint(step: u64, ls: &Vec<i64>, active: &HashMap<u64, (bool, Clause)
   let mut asn: HashMap<i64, Option<usize>> = ls.iter().map(|&x| (-x, None)).collect();
   let mut steps: Vec<u64> = Vec::new();
   for &c in is {
-    let mut uf: Option<i64> = None;
-    for &l in &active.get(&c).unwrap_or_else(
-      || panic!("bad hint {}: clause {:?} does not exist", step, c)).1 {
-      if !asn.contains_key(&-l) {
+      let mut uf: Option<i64> = None;
+      for &l in &active.get(&c).unwrap_or_else(
+        || panic!("bad hint {}: clause {:?} does not exist", step, c)).1 {
+        if !asn.contains_key(&-l) {
         assert!(uf.replace(l).is_none(),
           "bad hint {}: clause {:?} is not unit", step, c);
+          }
+        }
+      match uf {
+        None => {
+          steps.push(c);
+          return Some((asn, steps))
+        },
+        Some(l) => if let Entry::Vacant(v) = asn.entry(l) {
+          v.insert(Some(steps.len()));
+          steps.push(c);
+        }
       }
     }
-    match uf {
-      None => {
-        steps.push(c);
-        return Some((asn, steps))
-      },
-      Some(l) => if let Entry::Vacant(v) = asn.entry(l) {
-        v.insert(Some(steps.len()));
-        steps.push(c);
-      }
-    }
-  }
   panic!("bad hint {}: unit propagation failed to find conflict", step)
-}
+  }
 
 fn propagate_minimize(active: &HashMap<u64, (bool, Clause)>,
     asn: HashMap<i64, Option<usize>>, steps: &mut Vec<u64>) {
@@ -124,7 +124,7 @@ fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
   let mut active: HashMap<u64, (bool, Clause)> = HashMap::new();
 
   while let Some(s) = bp.next() {
-    eprintln!("{:?}", s);
+    // eprintln!("{:?}", s);
     match s {
 
       Step::Orig(i, ls) => {
@@ -146,16 +146,24 @@ fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
         }
       }
 
-      Step::Reloc(from, to) => {
-        if let Some(s) = active.remove(&to) {
-          assert!(active.insert(from, s).is_none(),
-            "Finalized a step that has been relocated");
+      Step::Reloc(mut relocs) => {
+        let removed: Vec<_> = relocs.iter().map(|(_, to)| active.remove(to)).collect();
+        let mut it = removed.into_iter();
+        relocs.retain(|&(from, to)| {
+          if let Some(s) = it.next().unwrap() {
+            assert!(active.insert(from, s).is_none(),
+              "Finalized a step that has been relocated, {} -> {}", from, to);
+            true
+          } else { false }
+        });
+        if !relocs.is_empty() {
+          ElabStep::Reloc(relocs).write(w).expect("Failed to write add step");
         }
       }
 
       Step::Del(i, ls) => {
         assert!(active.insert(i, (false, ls)).is_none(),
-          "Encountered a delete step for preexisting clause");
+          "Encountered a delete step for preexisting clause {}", i);
       }
 
       Step::Final(i, ls) => {
@@ -180,8 +188,8 @@ fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io:
     match bp.next().expect("did not find empty clause") {
 
       ElabStep::Orig(i, ls) => {
-        let j = cnf.iter().position(|x| is_perm(x, &ls)) // Find position of clause in original problem
-          .expect("Orig step refers to nonexistent clause") as u64 + 1;
+        let j = cnf.iter().position(|x| is_perm(x, &ls)).unwrap_or_else( // Find position of clause in original problem
+          || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls)) as u64 + 1;
         assert!(m.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
         if ls.is_empty() {
           write!(lrat, "{} 0 {} 0\n", k+1, j)?;
@@ -198,13 +206,20 @@ fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io:
         write!(lrat, "{}", k)?;
         for x in ls { write!(lrat, " {}", x)? }
         write!(lrat, " 0")?;
-        for x in is { write!(lrat, " {}", m[&x])? }
+        for x in is { write!(lrat, " {}", m.get(&x).unwrap_or_else(||
+          panic!("step {}: proof step {:?} not found", i, x)))? }
         write!(lrat, " 0\n")?;
 
         if b {return Ok(())}
       }
 
-      ElabStep::Reloc(from, to) => if let Some(s) = m.remove(&from) { m.insert(to, s); },
+      ElabStep::Reloc(relocs) => {
+        let removed: Vec<_> = relocs.iter()
+          .map(|(from, to)| (*to, m.remove(from))).collect();
+        for (to, o) in removed {
+          if let Some(s) = o { m.insert(to, s); }
+        }
+      }
 
       ElabStep::Del(i) => {
         write!(lrat, "{} d {}", k, m.remove(&i).unwrap())?; // Remove ID mapping to free space
