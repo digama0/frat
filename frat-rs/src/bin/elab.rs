@@ -7,6 +7,7 @@
 use std::io::{self, Write, BufWriter};
 use std::fs::{File, read_to_string};
 use std::env;
+use std::mem;
 use std::convert::TryFrom;
 use dimacs::parse_dimacs;
 use backparser::*;
@@ -283,6 +284,29 @@ impl Context {
     (m, c)
   }
 
+  fn reloc(&mut self, relocs: &mut Vec<(u64, u64)>) {
+    let mut m = HashMap::new();
+    let mut removed = Vec::new();
+    relocs.retain(|&(from, to)| {
+      if let Some(c) = self.clauses.remove(&to) {
+        m.insert(from, to);
+        removed.push((from, c, self.marks.remove(&to).unwrap(), self.units.remove(&to)));
+        true
+      } else {false}
+    });
+    for (from, c, m, u) in removed {
+      assert!(self.clauses.insert(from, c).is_none(),
+        "at {:?}: Clause {} to be inserted already exists", self.step, from);
+      self.marks.insert(from, m);
+      if u.is_some() { self.units.insert(from, ()); }
+    }
+    for (_, ws) in self.watch.iter_mut() {
+      for (n, _) in mem::replace(ws, HashMap::new()) {
+        ws.insert(m.get(&n).cloned().unwrap_or(n), ());
+      }
+    }
+  }
+
   fn get(&self, i: u64) -> &Clause {
     self.clauses.get(&i).unwrap_or_else(
       || panic!("at {:?}: Clause {} to be accessed does not exist", self.step, i))
@@ -386,26 +410,12 @@ fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
         }
       }
 
-      // Step::Reloc(mut relocs) => {
-      //   let removed: Vec<_> = relocs.iter().map(|(_, to)| active.remove(to)).collect();
-      //   let mut it = removed.into_iter();
-      //   relocs.retain(|&(from, to)| {
-      //     if let Some(s) = it.next().unwrap() {
-      //       assert!(active.insert(from, s).is_none(),
-      //         "Finalized a step that has been relocated, {} -> {}", from, to);
-      //       true
-      //     } else { false }
-      //   });
-      //   if !relocs.is_empty() {
-      //     ElabStep::Reloc(relocs).write(w).expect("Failed to write add step");
-      //   }
-      // }
-
-      Step::Reloc(relocs) => {
+      Step::Reloc(mut relocs) => {
         ctx.step = None;
-        let removed: Vec<_> = relocs.iter().map(|&(from, to)| (from, ctx.remove(to))).collect();
-        for (from, (m, c)) in removed { ctx.insert(from, m, c) }
-        ElabStep::Reloc(relocs).write(w).expect("Failed to write add step");
+        ctx.reloc(&mut relocs);
+        if !relocs.is_empty() {
+          ElabStep::Reloc(relocs).write(w).expect("Failed to write reloc step");
+        }
       }
 
       Step::Del(i, ls) => ctx.insert(i, false, ls),
