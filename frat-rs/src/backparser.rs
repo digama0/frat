@@ -5,16 +5,14 @@ use super::parser::*;
 
 const BUFFER_SIZE: usize = 0x4000;
 
-pub type Clause = Vec<i64>;
-
 #[derive(Debug)]
 enum Segment {
-  Orig(u64, Clause),
-  Add(u64, Clause),
+  Orig(u64, Vec<i64>),
+  Add(u64, Vec<i64>),
   LProof(Vec<u64>),
   Reloc(Vec<(u64, u64)>),
-  Del(u64, Clause),
-  Final(u64, Clause),
+  Del(u64, Vec<i64>),
+  Final(u64, Vec<i64>),
   Todo(u64),
 }
 
@@ -26,11 +24,11 @@ pub enum Proof {
 
 #[derive(Debug)]
 pub enum Step {
-  Orig(u64, Clause),
-  Add(u64, Clause, Option<Proof>),
-  Del(u64, Clause),
+  Orig(u64, Vec<i64>),
+  Add(u64, Vec<i64>, Option<Proof>),
+  Del(u64, Vec<i64>),
   Reloc(Vec<(u64, u64)>),
-  Final(u64, Clause),
+  Final(u64, Vec<i64>),
   Todo(u64),
 }
 
@@ -96,7 +94,7 @@ pub trait Mode {
     } }
   }
 
-  fn ivec<I: Iterator<Item=u8>>(it: &mut I) -> Clause {
+  fn ivec<I: Iterator<Item=u8>>(it: &mut I) -> Vec<i64> {
     let mut vec = Vec::new();
     loop { match Self::num(it).expect("bad step") {
       0 => return vec,

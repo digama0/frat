@@ -4,6 +4,8 @@ use hashbrown::hash_map::HashMap;
 use std::io;
 use super::backparser::*;
 
+type Clause = Vec<i64>;
+
 fn subsumes(clause: &Clause, clause2: &Clause) -> bool {
   clause2.iter().all(|lit2| clause.contains(lit2))
 }
