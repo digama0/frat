@@ -315,7 +315,6 @@ impl Context {
       match find_new_watch(c, va) {
         None => false,
         Some(j) => {
-          eprintln!("Working on clause : {:?}", c);
           let k = c[j];
           c[1] = k;
           c[j] = l;
@@ -431,7 +430,7 @@ fn find_new_watch(c: &Clause, va: &Vassign) -> Option<usize> {
   }
 }
 
-fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Result<()> {
+fn trim<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Result<()> {
   let mut k = cnf.len() as u64; // Counter for the last used ID
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
   let mut bp = ElabStepParser::<Bin>::new(temp)?.peekable();
@@ -507,9 +506,9 @@ fn main() -> io::Result<()> {
   let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
   eprintln!("trimming...");
   if let Some(p) = args.next() {
-    trim_bin(cnf, temp_read, &mut BufWriter::new(File::create(p)?))?;
+    trim(cnf, temp_read, &mut BufWriter::new(File::create(p)?))?;
   } else {
-    trim_bin(cnf, temp_read, &mut io::sink())?;
+    trim(cnf, temp_read, &mut io::sink())?;
   }
 
   Ok(())
