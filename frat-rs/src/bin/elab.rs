@@ -228,16 +228,8 @@ impl Context {
   }
 
   fn add_watch(&mut self, l: i64, id: u64) {
-
-        eprintln!("The ID : {:?}", id);
-        eprintln!("The literal : {:?}", l);
-
     if self.watch.contains_key(&l) {
-      if !self.watch.get_mut(&l).unwrap().insert(id, ()).is_none() {
-        eprintln!("The clause : {:?}", self.get(id));
-        eprintln!("Watch bucket : {:?}", self.watch.get(&l));
-        panic!("Clause already watched");
-      }
+      assert!(self.watch.get_mut(&l).unwrap().insert(id, ()).is_none(), "Clause already watched"); 
     } else {
       let mut nw: HashMap<u64, ()> = HashMap::new();
       nw.insert(id, ());
@@ -320,7 +312,7 @@ impl Context {
     if va.holds(l) == None {
       true
     } else {
-      match c.iter().skip(2).position(|x| va.holds(*x) == None) {
+      match find_new_watch(c, va) {
         None => false,
         Some(j) => {
           eprintln!("Working on clause : {:?}", c);
@@ -343,7 +335,7 @@ impl Context {
     if va.holds(l) == None {
       true
     } else {
-      match c.iter().skip(2).position(|x| va.holds(*x) == None) {
+      match find_new_watch(c, va) {
         None => false,
         Some(j) => {
           let k = c[j];
@@ -430,6 +422,13 @@ fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
   }
 
   Ok(())
+}
+
+fn find_new_watch(c: &Clause, va: &Vassign) -> Option<usize> {
+  match c.iter().skip(2).position(|x| va.holds(*x) == None) {
+    None => None, 
+    Some(u) => Some(u + 2)
+  }
 }
 
 fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Result<()> {
