@@ -27,7 +27,7 @@ impl VAssign {
   }
 
   fn holds(&self, l: i64) -> Option<bool> {
-    self.values.get(var(l)).cloned().unwrap_or(None)
+    self.values.get(var(l)).unwrap_or(&None).map(|b| (l < 0) ^ b)
   }
 
   // Attempt to update the variable assignment and make l true under it.
@@ -389,7 +389,8 @@ fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
 
       Step::Add(i, ls, p) => {
         ctx.step = Some(i);
-        if ctx.marked(i) {
+        let c = ctx.remove(i);
+        if c.marked {
           let mut ht: Hint = match p {
             Some(Proof::LRAT(is)) => propagate_hint(&ls, &ctx, &is),
             _ => None
