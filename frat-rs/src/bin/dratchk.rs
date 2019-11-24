@@ -32,7 +32,7 @@ impl<I: Iterator<Item=u8>> Iterator for ProofIter<I> {
     let mut vec = Vec::new();
     loop {
       match parse_num(&mut self.0).expect("expected literal") {
-        0 => return Some((k, Rc::new(vec))),
+        0 => return Some((k, vec)),
         lit => vec.push(lit)
       }
     }

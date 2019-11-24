@@ -8,6 +8,8 @@ use std::io::{self, Write, BufWriter};
 use std::fs::{File, read_to_string};
 use std::env;
 use std::mem;
+use std::hash::{Hash, Hasher};
+use std::num::Wrapping;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 use dimacs::parse_dimacs;
 use backparser::*;
@@ -398,25 +400,28 @@ fn find_new_watch(c: &Clause, va: &VAssign) -> Option<usize> {
   c.iter().skip(2).position(|x| va.val(*x).is_none()).map(|u| u+2)
 }
 
-fn clause_hash(c: &Vec<i64>) -> i64 {
-  c.into_iter().sum()
+#[derive(Copy, Clone)]
+struct PermClause<'a>(&'a Vec<i64>);
+
+impl<'a> Hash for PermClause<'a> {
+  fn hash<H: Hasher>(&self, h: &mut H) {
+    // Permutation-stable hash function from drat-trim.c
+    let (mut sum, mut prod, mut xor) = (Wrapping(0u64), Wrapping(1u64), Wrapping(0u64));
+    for &i in self.0 { let i = Wrapping(i as u64); prod *= i; sum += i; xor ^= i; }
+    (Wrapping(1023) * sum + prod ^ (Wrapping(31) * xor)).hash(h)
+  }
 }
 
-fn find_input_clause(cnf: &HashMap<i64, Vec<(u64, dimacs::Clause)>>, ls: &Vec<i64>) -> u64 {
-  let hs = clause_hash(ls);
-  let bkt = cnf.get(&hs).unwrap();
-  let (j, _) = bkt.iter().find(|x| is_perm(&x.1, ls)).unwrap();
-  *j
+impl<'a> PartialEq for PermClause<'a> {
+  fn eq(&self, other: &Self) -> bool { is_perm(&self.0, &other.0) }
 }
+impl<'a> Eq for PermClause<'a> {}
 
-fn trim<W: Write>(dimacs: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Result<()> {
+fn trim<W: Write>(cnf: Vec<Vec<i64>>, temp: File, lrat: &mut W) -> io::Result<()> {
 
   let mut k = 0 as u64; // Counter for the last used ID
-  let mut cnf = HashMap::<i64, Vec<(u64, dimacs::Clause)>>::new(); // original CNF
-  for c in dimacs {
-    k += 1;
-    cnf.entry(clause_hash(&c)).or_insert_with(Vec::new).push((k, c));
-  }
+  let cnf: HashMap<PermClause, u64> = // original CNF
+    cnf.iter().map(|c| (PermClause(c), (k += 1, k).1)).collect();
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
   let mut bp = ElabStepParser::<Bin>::new(temp)?.peekable();
 
@@ -427,9 +432,8 @@ fn trim<W: Write>(dimacs: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::
     match s {
 
       ElabStep::Orig(i, ls) => {
-        // let j = cnf.iter().position(|x| is_perm(x, &ls)).unwrap_or_else( // Find position of clause in original problem
-        //   || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls)) as u64 + 1;
-        let j = find_input_clause(&cnf, &ls);
+        let j = *cnf.get(&PermClause(&ls)).unwrap_or_else( // Find position of clause in original problem
+          || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls));
         assert!(m.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
         // eprintln!("{} -> {}", i, j);
         if ls.is_empty() {

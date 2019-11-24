@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Token {
 	Nat(i64),
@@ -105,7 +103,7 @@ impl<I> Iterator for Lexer<I> where I: Iterator<Item=char> {
   }
 }
 
-pub type Clause = Rc<Vec<i64>>;
+pub type Clause = Vec<i64>;
 pub fn parse_dimacs<I: Iterator<Item=char>>(input: I) -> (usize, Vec<Clause>) {
   let mut lex = Lexer::from(input);
   match (lex.next(), lex.next(), lex.next(), lex.next()) {
@@ -121,7 +119,7 @@ pub fn parse_dimacs<I: Iterator<Item=char>>(input: I) -> (usize, Vec<Clause>) {
             _ => panic!("parse DIMACS failed")
           }
         }
-        fmla.push(Rc::new(clause));
+        fmla.push(clause);
       }
     },
     _ => panic!("parse DIMACS failed")
