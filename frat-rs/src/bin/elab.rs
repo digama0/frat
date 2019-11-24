@@ -430,7 +430,18 @@ fn find_new_watch(c: &Clause, va: &Vassign) -> Option<usize> {
   }
 }
 
-fn trim<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Result<()> {
+fn clause_hash(c: &Vec<i64>) -> i64 {
+  c.into_iter().sum()
+}
+
+fn find_input_clause(cnf: &HashMap<i64, Vec<(u64, dimacs::Clause)>>, ls: &Clause) -> u64 {
+  let hs = clause_hash(ls);
+  let bkt = cnf.get(&hs).unwrap();
+  let (j, _) = bkt.iter().find(|x| is_perm(&x.1, ls)).unwrap();
+  *j
+}
+
+fn trim<W: Write>(cnf: HashMap<i64, Vec<(u64, dimacs::Clause)>>, temp: File, lrat: &mut W) -> io::Result<()> {
   let mut k = cnf.len() as u64; // Counter for the last used ID
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
   let mut bp = ElabStepParser::<Bin>::new(temp)?.peekable();
@@ -439,8 +450,9 @@ fn trim<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Res
     match bp.next().expect("did not find empty clause") {
 
       ElabStep::Orig(i, ls) => {
-        let j = cnf.iter().position(|x| is_perm(x, &ls)).unwrap_or_else( // Find position of clause in original problem
-          || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls)) as u64 + 1;
+        // let j = cnf.iter().position(|x| is_perm(x, &ls)).unwrap_or_else( // Find position of clause in original problem
+        //   || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls)) as u64 + 1;
+        let j = find_input_clause(&cnf, &ls);
         assert!(m.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
         if ls.is_empty() {
           write!(lrat, "{} 0 {} 0\n", k+1, j)?;
