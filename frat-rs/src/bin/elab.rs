@@ -14,42 +14,16 @@ use backparser::*;
 use serialize::Serialize;
 use hashbrown::hash_map::{HashMap, Entry};
 
-struct Hint {
-  reasons: HashMap<i64, Option<usize>>,
-  steps: Vec<u64>
-}
-
-impl Hint {
-  fn new() -> Hint {
-    Hint {
-      reasons: HashMap::new() ,
-      steps: Vec::new()
-    }
-  }
-
-  fn add(&mut self, l: i64, rs: Option<u64>) {
-    match rs {
-      None => {
-        self.reasons.insert(l, None);
-      },
-      Some(id) => {
-        self.reasons.insert(l, Some(self.steps.len()));
-        self.steps.push(id);
-      }
-    }
-  }
-}
-
-struct Vassign {
+struct VAssign {
   values: Vec<Option<bool>>
 }
 
 fn var(l: i64) -> usize { l.abs() as usize }
 
-impl Vassign {
+impl VAssign {
 
-  fn new() -> Vassign {
-    Vassign { values: Vec::new() }
+  fn new() -> VAssign {
+    VAssign { values: Vec::new() }
   }
 
   fn holds(&self, l: i64) -> Option<bool> {
@@ -121,17 +95,14 @@ impl Context {
   }
 
   fn del_watch(&mut self, l: i64, i: u64) {
-      assert!(self.watch.get_mut(&l).unwrap().remove(&i).is_some(), "Clause not watched");
+    // eprintln!("remove watch: {:?} for {:?}", l, i);
+
+    assert!(self.watch.get_mut(&l).unwrap().remove(&i).is_some(), "Clause not watched");
   }
 
   fn add_watch(&mut self, l: i64, id: u64) {
-    if self.watch.contains_key(&l) {
-      assert!(self.watch.get_mut(&l).unwrap().insert(id, ()).is_none(), "Clause already watched");
-    } else {
-      let mut nw: HashMap<u64, ()> = HashMap::new();
-      nw.insert(id, ());
-      self.watch.insert(l, nw);
-    }
+    assert!(self.watch.entry(l).or_insert_with(HashMap::new).insert(id, ()).is_none(),
+      "Clause already watched");
   }
 
   fn insert(&mut self, i: u64, marked: bool, lits: Vec<i64>) {
@@ -192,18 +163,18 @@ impl Context {
       || panic!("at {:?}: Clause {} to be accessed does not exist", self.step, i))
   }
 
-  fn watch_first(&mut self, i: u64, va: &Vassign) -> bool {
+  fn watch_first(&mut self, i: u64, va: &VAssign) -> bool {
 
     let c = self.clauses.get_mut(&i).unwrap();
     let l = c[0];
 
-    if va.holds(l) == None {
+    if va.holds(l).is_none() {
       true
     } else {
       match find_new_watch(c, va) {
         None => false,
         Some(j) => {
-          eprintln!("Working on clause : {:?}", c);
+          eprintln!("Working on clause {}: {:?}", i, c);
           let k = c[j];
           c[1] = k;
           c[j] = l;
@@ -215,17 +186,18 @@ impl Context {
     }
   }
 
-  fn watch_second(&mut self, i: u64, va: &Vassign) -> bool {
+  fn watch_second(&mut self, i: u64, va: &VAssign) -> bool {
 
     let c = self.clauses.get_mut(&i).unwrap();
     let l = c[1];
 
-    if va.holds(l) == None {
+    if va.holds(l).is_none() {
       true
     } else {
       match find_new_watch(c, va) {
         None => false,
         Some(j) => {
+          // eprintln!("Working on clause {} second: {:?} at {}", i, c, j);
           let k = c[j];
           c[1] = k;
           c[j] = l;
@@ -242,26 +214,55 @@ impl Context {
   // do nothing and return None. If c is not verified but contains two
   // or more undecided literals, watch them and return none. Otherwise,
   // return Some(k), where k is a new unit literal.
-  fn propagate(&mut self, i: u64, va: &Vassign) -> Option<i64> {
-    if self.get(i).iter().any(|x| va.holds(*x) == Some(true)) {
-      None
-    } else {
-      if self.watch_first(i, va) {
-        if self.watch_second(i, va) {
-          None
-        }
-        else {
-          Some(self.get(i)[0])
-        }
-      } else {
-        Some(self.get(i)[1])
+  fn propagate(&mut self, i: u64, va: &VAssign) -> Option<i64> {
+    if self.get(i).iter().any(|x| va.holds(*x) == Some(true)) {return None}
+    if !self.watch_first(i, va) {return Some(self.get(i)[1])}
+    if !self.watch_second(i, va) {return Some(self.get(i)[0])}
+    None
+  }
+}
+
+struct Hint {
+  reasons: HashMap<i64, Option<usize>>,
+  steps: Vec<u64>
+}
+
+impl Hint {
+  fn new() -> Hint {
+    Hint {
+      reasons: HashMap::new() ,
+      steps: Vec::new()
+    }
+  }
+
+  fn add(&mut self, l: i64, rs: Option<u64>) {
+    match rs {
+      None => {
+        self.reasons.insert(l, None);
+      },
+      Some(id) => {
+        self.reasons.insert(l, Some(self.steps.len()));
+        self.steps.push(id);
       }
     }
+  }
+
+  fn minimize(&mut self, ctx: &Context) {
+    let mut need = vec![false; self.steps.len()];
+    *need.last_mut().unwrap() = true;
+    for (i, &s) in self.steps.iter().enumerate().rev() {
+      if need[i] {
+        for l in ctx.get(s) {
+          if let Some(&Some(j)) = self.reasons.get(&-l) {need[j] = true}
+        }
+      }
+    }
+    self.steps.retain({ let mut i = 0; move |_| (need[i], i += 1).0 });
   }
 }
 
 // Propagate literal l. Returns false if a contradiction has been found
-fn propagate_one(l: i64, ctx: &mut Context, va: &mut Vassign, ht: &mut Hint) -> bool {
+fn propagate_one(l: i64, ctx: &mut Context, va: &mut VAssign, ht: &mut Hint) -> bool {
 
   match ctx.watch.get(&-l) {
     // If l is not watched at all, no new information can be obtained by propagating l
@@ -286,7 +287,7 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
 
   // ls is the list of obtained unit literals
   let mut ls: Vec<i64> = Vec::new();
-  let mut va = Vassign::new();
+  let mut va = VAssign::new();
   let mut ht = Hint::new();
 
   for l in c {
@@ -306,26 +307,21 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
     }
   }
 
+  // Main unit propagation loop
+
   // ctr is the counter which keeps track of the literals of uls that
   // has already been used for unit propagtion. It always points to the
   // next fresh literal to be propagated.
-  let mut ctr: usize = 0;
-
-  // Main unit propagation loop
-  'prop: loop {
-
-    // If there are no more literals to propagate, unit propagation has failed
-    if ls.len() <= ctr { panic!("Unit propagation stuck"); }
-
-    if propagate_one(ls[ctr], ctx, &mut va, &mut ht) {
+  for lit in ls {
+    if propagate_one(lit, ctx, &mut va, &mut ht) {
       return ht;
       // let map: HashMap<i64, Option<usize>> = uls.iter().map(|x| x.clone()).collect();
       // return (map, sts);
     }
-
-    ctr += 1;
-    continue 'prop;
   }
+
+  // If there are no more literals to propagate, unit propagation has failed
+  panic!("Unit propagation stuck");
 }
 
 fn propagate_hint(ls: &Vec<i64>, ctx: &Context, is: &Vec<u64>) -> Option<Hint> {
@@ -363,20 +359,6 @@ fn propagate_hint(ls: &Vec<i64>, ctx: &Context, is: &Vec<u64>) -> Option<Hint> {
   }
 }
 
-fn propagate_minimize(ctx: &Context, ht: &mut Hint) {
-  let mut need = vec![false; ht.steps.len()];
-  *need.last_mut().unwrap() = true;
-  for (i, s) in ht.steps.iter().enumerate().rev() {
-    if need[i] {
-      for l in ctx.get(*s) {
-        if let Some(&Some(j)) = ht.reasons.get(&-l) {need[j] = true}
-      }
-    }
-  }
-  let mut i = 0;
-  ht.steps.retain(|_| (need[i], i += 1).0);
-}
-
 fn undelete<W: Write>(is: &Vec<u64>, ctx: &mut Context, w: &mut W) {
   for &i in is {
     // let v = cs.get_mut(&i).unwrap();
@@ -411,7 +393,7 @@ fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
             Some(Proof::LRAT(is)) => propagate_hint(&ls, &ctx, &is),
             _ => None
           }.unwrap_or_else(|| propagate(&ls, &mut ctx));
-          propagate_minimize(&ctx, &mut ht);
+          ht.minimize(&ctx);
           undelete(&ht.steps, &mut ctx, w);
           ElabStep::Add(i, ls, ht.steps).write(w).expect("Failed to write add step");
         }
@@ -439,11 +421,8 @@ fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
   Ok(())
 }
 
-fn find_new_watch(c: &Clause, va: &Vassign) -> Option<usize> {
-  match c.iter().skip(2).position(|x| va.holds(*x) == None) {
-    None => None,
-    Some(u) => Some(u + 2)
-  }
+fn find_new_watch(c: &Clause, va: &VAssign) -> Option<usize> {
+  c.iter().skip(2).position(|x| va.holds(*x).is_none()).map(|u| u+2)
 }
 
 fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Result<()> {
