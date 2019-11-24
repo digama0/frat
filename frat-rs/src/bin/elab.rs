@@ -26,24 +26,21 @@ impl VAssign {
     VAssign { values: Vec::new() }
   }
 
-  fn holds(&self, l: i64) -> Option<bool> {
+  fn val(&self, l: i64) -> Option<bool> {
     self.values.get(var(l)).unwrap_or(&None).map(|b| (l < 0) ^ b)
   }
 
   // Attempt to update the variable assignment and make l true under it.
   // If the update is impossible because l is already false under it, return false.
   // Otherwise, update and return true.
-  fn set(&mut self, l : i64) -> bool {
-    if self.holds(l) == Some(false) {
-      return false;
-    } else {
-      let i = var(l);
-      if self.values.len() <= i {
-        self.values.resize(i + 1, None);
-      }
-      self.values[i] = Some(0 < l);
-      true
+  fn set(&mut self, l: i64) -> bool {
+    if let Some(v) = self.val(l) { return v }
+    let i = var(l);
+    if self.values.len() <= i {
+      self.values.resize(i + 1, None);
     }
+    self.values[i] = Some(0 < l);
+    true
   }
 }
 
@@ -169,22 +166,16 @@ impl Context {
     let c = self.clauses.get_mut(&i).unwrap();
     let l = c[0];
 
-    if va.holds(l).is_none() {
+    if va.val(l).is_none() { return true }
+    if let Some(j) = find_new_watch(c, va) {
+      // eprintln!("Working on clause {}: {:?} at {}", i, c, j);
+      let k = c[j];
+      c[0] = k;
+      c[j] = l;
+      self.del_watch(l, i);
+      self.add_watch(k, i);
       true
-    } else {
-      match find_new_watch(c, va) {
-        None => false,
-        Some(j) => {
-          // eprintln!("Working on clause {}: {:?} at {}", i, c, j);
-          let k = c[j];
-          c[0] = k;
-          c[j] = l;
-          self.del_watch(l, i);
-          self.add_watch(k, i);
-          true
-        }
-      }
-    }
+    } else {false}
   }
 
   fn watch_second(&mut self, i: u64, va: &VAssign) -> bool {
@@ -192,22 +183,16 @@ impl Context {
     let c = self.clauses.get_mut(&i).unwrap();
     let l = c[1];
 
-    if va.holds(l).is_none() {
+    if va.val(l).is_none() { return true }
+    if let Some(j) = find_new_watch(c, va) {
+      // eprintln!("Working on clause {} second: {:?} at {}", i, c, j);
+      let k = c[j];
+      c[1] = k;
+      c[j] = l;
+      self.del_watch(l, i);
+      self.add_watch(k, i);
       true
-    } else {
-      match find_new_watch(c, va) {
-        None => false,
-        Some(j) => {
-          // eprintln!("Working on clause {} second: {:?} at {}", i, c, j);
-          let k = c[j];
-          c[1] = k;
-          c[j] = l;
-          self.del_watch(l, i);
-          self.add_watch(k, i);
-          true
-        }
-      }
-    }
+    } else {false}
   }
 
   // va is the current variable assignment, and i is the ID of a clause,
@@ -216,25 +201,21 @@ impl Context {
   // or more undecided literals, watch them and return none. Otherwise,
   // return Some(k), where k is a new unit literal.
   fn propagate(&mut self, i: u64, va: &VAssign) -> Option<i64> {
-    if self.get(i).iter().any(|x| va.holds(*x) == Some(true)) {return None}
+    if self.get(i).iter().any(|&l| va.val(l) == Some(true)) {return None}
     if !self.watch_first(i, va) {return Some(self.get(i)[1])}
     if !self.watch_second(i, va) {return Some(self.get(i)[0])}
     None
   }
 }
 
+#[derive(Debug, Default)]
 struct Hint {
   reasons: HashMap<i64, Option<usize>>,
   steps: Vec<u64>
 }
 
 impl Hint {
-  fn new() -> Hint {
-    Hint {
-      reasons: HashMap::new() ,
-      steps: Vec::new()
-    }
-  }
+  fn new() -> Hint { Default::default() }
 
   fn add(&mut self, l: i64, rs: Option<u64>) {
     match rs {
@@ -265,23 +246,18 @@ impl Hint {
 // Propagate literal l. Returns false if a contradiction has been found
 fn propagate_one(l: i64, ctx: &mut Context, va: &mut VAssign, ht: &mut Hint) -> bool {
 
-  match ctx.watch.get(&-l) {
-    // If l is not watched at all, no new information can be obtained by propagating l
-    None => true,
+  // If l is not watched at all, no new information can be obtained by propagating l
+  if let Some(is) = ctx.watch.get(&-l) {
     // 'is' is the (reference to) IDs of all clauses containing -l
-    Some(is) => {
-      let js: Vec<u64> = is.keys().map(|x| x.clone()).collect();
-      for j in js {
-        if let Some(k) = ctx.propagate(j, va) {
-          ht.add(k, Some(j));
-          if !va.set(k) {
-            return false;
-          }
-        }
+    let js: Vec<u64> = is.keys().cloned().collect();
+    for j in js {
+      if let Some(k) = ctx.propagate(j, va) {
+        ht.add(k, Some(j));
+        if !va.set(k) { return false }
       }
-      true
     }
   }
+  true
 }
 
 fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
@@ -294,18 +270,13 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
   for l in c {
     ls.push(-l);
     ht.add(-l, None);
-    if !va.set(-l) {
-      return ht;
-    }
+    if !va.set(-l) { return ht }
   }
 
-  for i in ctx.units.keys() {
-    let l = ctx.get(*i)[0];
+  for (&i, &l) in &ctx.units {
     ls.push(l);
-    ht.add(l, Some(*i));
-    if !va.set(l) {
-      return ht;
-    }
+    ht.add(l, Some(i));
+    if !va.set(l) { return ht }
   }
 
   // Main unit propagation loop
@@ -376,7 +347,7 @@ fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
   let mut ctx: Context = Context::new();
 
   while let Some(s) = bp.next() {
-    // eprintln!("{:?}", s);
+    // eprintln!("<- {:?}", s);
     match s {
 
       Step::Orig(i, ls) => {
@@ -424,7 +395,7 @@ fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
 }
 
 fn find_new_watch(c: &Clause, va: &VAssign) -> Option<usize> {
-  c.iter().skip(2).position(|x| va.holds(*x).is_none()).map(|u| u+2)
+  c.iter().skip(2).position(|x| va.val(*x).is_none()).map(|u| u+2)
 }
 
 fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Result<()> {
@@ -433,12 +404,16 @@ fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io:
   let mut bp = ElabStepParser::<Bin>::new(temp)?.peekable();
 
   loop {
-    match bp.next().expect("did not find empty clause") {
+    let s = bp.next().expect("did not find empty clause");
+    // eprintln!("-> {:?}", s);
+
+    match s {
 
       ElabStep::Orig(i, ls) => {
         let j = cnf.iter().position(|x| is_perm(x, &ls)).unwrap_or_else( // Find position of clause in original problem
           || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls)) as u64 + 1;
         assert!(m.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
+        // eprintln!("{} -> {}", i, j);
         if ls.is_empty() {
           write!(lrat, "{} 0 {} 0\n", k+1, j)?;
           return Ok(())
@@ -448,6 +423,7 @@ fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io:
       ElabStep::Add(i, ls, is) => {
         k += 1; // Get the next fresh ID
         m.insert(i, k); // The ID of added clause is mapped to a fresh ID
+        // eprintln!("{} -> {}", i, k);
         let b = ls.is_empty();
 
         write!(lrat, "{}", k)?;
