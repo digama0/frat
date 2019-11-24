@@ -402,17 +402,21 @@ fn clause_hash(c: &Vec<i64>) -> i64 {
   c.into_iter().sum()
 }
 
-fn find_input_clause(cnf: &HashMap<i64, Vec<(u64, dimacs::Clause)>>, ls: &Clause) -> u64 {
+fn find_input_clause(cnf: &HashMap<i64, Vec<(u64, dimacs::Clause)>>, ls: &Vec<i64>) -> u64 {
   let hs = clause_hash(ls);
   let bkt = cnf.get(&hs).unwrap();
   let (j, _) = bkt.iter().find(|x| is_perm(&x.1, ls)).unwrap();
   *j
 }
 
-fn trim<W: Write>(cnt: usize, cnf: HashMap<i64, Vec<(u64, dimacs::Clause)>>,
-  temp: File, lrat: &mut W) -> io::Result<()> {
+fn trim<W: Write>(dimacs: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Result<()> {
 
-  let mut k = cnt as u64; // Counter for the last used ID
+  let mut k = 0 as u64; // Counter for the last used ID
+  let mut cnf = HashMap::<i64, Vec<(u64, dimacs::Clause)>>::new(); // original CNF
+  for c in dimacs {
+    k += 1;
+    cnf.entry(clause_hash(&c)).or_insert_with(Vec::new).push((k, c));
+  }
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
   let mut bp = ElabStepParser::<Bin>::new(temp)?.peekable();
 
@@ -490,12 +494,12 @@ fn main() -> io::Result<()> {
   eprintln!("parsing DIMACS...");
 
   let temp_read = File::open(temp_path)?;
-  let (cnt, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
+  let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
   eprintln!("trimming...");
   if let Some(p) = args.next() {
-    trim(cnt, cnf, temp_read, &mut BufWriter::new(File::create(p)?))?;
+    trim(cnf, temp_read, &mut BufWriter::new(File::create(p)?))?;
   } else {
-    trim(cnt, cnf, temp_read, &mut io::sink())?;
+    trim(cnf, temp_read, &mut io::sink())?;
   }
 
   Ok(())
