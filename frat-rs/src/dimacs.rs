@@ -117,7 +117,7 @@ pub fn parse_dimacs<I: Iterator<Item=char>>(input: I) -> (usize, HashMap<i64, Ve
   let mut lex = Lexer::from(input);
 
   match (lex.next(), lex.next(), lex.next(), lex.next()) {
-    (Some(Ident(Problem)), Some(Ident(Cnf)), Some(Nat(vars)), Some(Nat(_clauses))) => {
+    (Some(Ident(Problem)), Some(Ident(Cnf)), Some(Nat(_vars)), Some(Nat(clauses))) => {
       let mut fmla: HashMap<i64, Vec<(u64, Clause)>> = HashMap::new();
       let mut ctr: u64 = 1;
       loop {
@@ -126,7 +126,7 @@ pub fn parse_dimacs<I: Iterator<Item=char>>(input: I) -> (usize, HashMap<i64, Ve
           match lex.next() {
             Some(Nat(0)) => break,
             Some(Nat(lit)) => clause.push(lit),
-            None => return (vars as usize, fmla),
+            None => return (clauses as usize, fmla),
             _ => panic!("parse DIMACS failed")
           }
         }

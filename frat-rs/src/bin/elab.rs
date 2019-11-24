@@ -316,7 +316,7 @@ impl Context {
         None => false,
         Some(j) => {
           let k = c[j];
-          c[1] = k;
+          c[0] = k;
           c[j] = l;
           self.del_watch(l, i);
           self.add_watch(k, i);
@@ -441,8 +441,10 @@ fn find_input_clause(cnf: &HashMap<i64, Vec<(u64, dimacs::Clause)>>, ls: &Clause
   *j
 }
 
-fn trim<W: Write>(cnf: HashMap<i64, Vec<(u64, dimacs::Clause)>>, temp: File, lrat: &mut W) -> io::Result<()> {
-  let mut k = cnf.len() as u64; // Counter for the last used ID
+fn trim<W: Write>(cnt: usize, cnf: HashMap<i64, Vec<(u64, dimacs::Clause)>>, 
+  temp: File, lrat: &mut W) -> io::Result<()> {
+
+  let mut k = cnt as u64; // Counter for the last used ID
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
   let mut bp = ElabStepParser::<Bin>::new(temp)?.peekable();
 
@@ -515,12 +517,12 @@ fn main() -> io::Result<()> {
   eprintln!("parsing DIMACS...");
 
   let temp_read = File::open(temp_path)?;
-  let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
+  let (cnt, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
   eprintln!("trimming...");
   if let Some(p) = args.next() {
-    trim(cnf, temp_read, &mut BufWriter::new(File::create(p)?))?;
+    trim(cnt, cnf, temp_read, &mut BufWriter::new(File::create(p)?))?;
   } else {
-    trim(cnf, temp_read, &mut io::sink())?;
+    trim(cnt, cnf, temp_read, &mut io::sink())?;
   }
 
   Ok(())
