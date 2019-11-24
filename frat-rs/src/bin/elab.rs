@@ -197,7 +197,7 @@ impl Context {
     } else {false}
   }
 
-  // va is the current variable assignment, and i is the ID of a clause,
+  // va is the current variable assignment, and i is the ID of a clause
   // which may potentially be unit under va. If c is verified under va,
   // do nothing and return None. If c is not verified but contains two
   // or more undecided literals, watch them and return none. Otherwise,
@@ -233,7 +233,10 @@ impl Hint {
 
   fn minimize(&mut self, ctx: &Context) {
     let mut need = vec![false; self.steps.len()];
-    *need.last_mut().unwrap() = true;
+    match need.last_mut() {
+      None => panic!("Failed, found a hint with {:?} reasons, {:?} steps", self.reasons.len(), self.steps.len()),
+      Some(last_step) => *last_step = true 
+    } 
     for (i, &s) in self.steps.iter().enumerate().rev() {
       if need[i] {
         for l in ctx.get(s) {
@@ -246,7 +249,7 @@ impl Hint {
 }
 
 // Propagate literal l. Returns false if a contradiction has been found
-fn propagate_one(l: i64, ctx: &mut Context, va: &mut VAssign, ht: &mut Hint) -> bool {
+fn propagate_one(l: i64, ls: &mut Vec<i64>, ctx: &mut Context, va: &mut VAssign, ht: &mut Hint) -> bool {
 
   // If l is not watched at all, no new information can be obtained by propagating l
   if let Some(is) = ctx.watch.get(&-l) {
@@ -254,6 +257,7 @@ fn propagate_one(l: i64, ctx: &mut Context, va: &mut VAssign, ht: &mut Hint) -> 
     let js: Vec<u64> = is.keys().cloned().collect();
     for j in js {
       if let Some(k) = ctx.propagate(j, va) {
+        ls.push(k);
         ht.add(k, Some(j));
         if !va.set(k) { return false }
       }
@@ -264,7 +268,6 @@ fn propagate_one(l: i64, ctx: &mut Context, va: &mut VAssign, ht: &mut Hint) -> 
 
 fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
 
-  // ls is the list of obtained unit literals
   let mut ls: Vec<i64> = Vec::new();
   let mut va = VAssign::new();
   let mut ht = Hint::new();
@@ -285,17 +288,32 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
 
   // ctr is the counter which keeps track of the literals of uls that
   // has already been used for unit propagtion. It always points to the
-  // next fresh literal to be propagated.
-  for lit in ls {
-    if propagate_one(lit, ctx, &mut va, &mut ht) {
-      return ht;
-      // let map: HashMap<i64, Option<usize>> = uls.iter().map(|x| x.clone()).collect();
-      // return (map, sts);
-    }
+  // next fresh literal to be propagated (a simpler iteration over ls 
+  // doesn't work here because ls itself is growing).
+  let mut ctr: usize = 0;
+  // Main unit propagation loop
+  'prop: loop {
+    // If there are no more literals to propagate, unit propagation has failed
+    if ls.len() <= ctr { propagate_stuck(ctx, &ht, &ls, c)
+      .expect("Failed to write unit propagation error log"); }
+    if !propagate_one(ls[ctr], &mut ls, ctx, &mut va, &mut ht) { return ht; }
+    ctr += 1;
+    continue 'prop;
   }
+}
 
-  // If there are no more literals to propagate, unit propagation has failed
-  panic!("Unit propagation stuck");
+fn propagate_stuck(ctx: &Context, ht: &Hint, ls: &Vec<i64>, c: &Vec<i64>) -> io::Result<()> {
+  // If unit propagation is stuck, write an error log
+  let mut log = File::create("unit_prop_error_log").unwrap();
+  writeln!(log, "Clauses available at failure :\n")?;
+  for ac in &ctx.clauses {
+    writeln!(log, "{:?} : {:?}", ac.0, ac.1.lits)?;
+  }
+  writeln!(log, "\nDiscovered reasons at failure : {:?}", ht.reasons)?;
+  writeln!(log, "\nRecorded steps at failure : {:?}", ht.steps)?;
+  writeln!(log, "\nObtained unit literals at failure : {:?}", ls)?;
+  writeln!(log, "\nFailed to add clause : {:?}", c)?;
+  panic!("Unit propagation stuck, cannot add clause {:?}", c);
 }
 
 fn propagate_hint(ls: &Vec<i64>, ctx: &Context, is: &Vec<u64>) -> Option<Hint> {
