@@ -97,7 +97,8 @@ impl Context {
   fn del_watch(&mut self, l: i64, i: u64) {
     // eprintln!("remove watch: {:?} for {:?}", l, i);
 
-    assert!(self.watch.get_mut(&l).unwrap().remove(&i).is_some(), "Clause not watched");
+    assert!(self.watch.get_mut(&l).unwrap().remove(&i).is_some(),
+      "Literal {} not watched in clause {:?}", l, i);
   }
 
   fn add_watch(&mut self, l: i64, id: u64) {
@@ -174,9 +175,9 @@ impl Context {
       match find_new_watch(c, va) {
         None => false,
         Some(j) => {
-          eprintln!("Working on clause {}: {:?}", i, c);
+          // eprintln!("Working on clause {}: {:?} at {}", i, c, j);
           let k = c[j];
-          c[1] = k;
+          c[0] = k;
           c[j] = l;
           self.del_watch(l, i);
           self.add_watch(k, i);
