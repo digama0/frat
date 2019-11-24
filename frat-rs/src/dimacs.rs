@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use hashbrown::hash_map::{HashMap};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Token {
@@ -105,23 +106,42 @@ impl<I> Iterator for Lexer<I> where I: Iterator<Item=char> {
   }
 }
 
+fn clause_hash(c: &Vec<i64>) -> i64 {
+  c.into_iter().sum()
+}
+
 pub type Clause = Rc<Vec<i64>>;
-pub fn parse_dimacs<I: Iterator<Item=char>>(input: I) -> (usize, Vec<Clause>) {
+
+pub fn parse_dimacs<I: Iterator<Item=char>>(input: I) -> (usize, HashMap<i64, Vec<(u64, Clause)>>) {
+
   let mut lex = Lexer::from(input);
+
   match (lex.next(), lex.next(), lex.next(), lex.next()) {
-    (Some(Ident(Problem)), Some(Ident(Cnf)), Some(Nat(vars)), Some(Nat(clauses))) => {
-      let mut fmla = Vec::with_capacity(clauses as usize);
+    (Some(Ident(Problem)), Some(Ident(Cnf)), Some(Nat(_vars)), Some(Nat(clauses))) => {
+      let mut fmla: HashMap<i64, Vec<(u64, Clause)>> = HashMap::new();
+      let mut ctr: u64 = 1;
       loop {
-        let mut clause = Vec::new();
+        let mut clause: Vec<i64> = Vec::new();
         loop {
           match lex.next() {
             Some(Nat(0)) => break,
             Some(Nat(lit)) => clause.push(lit),
-            None => return (vars as usize, fmla),
+            None => return (clauses as usize, fmla),
             _ => panic!("parse DIMACS failed")
           }
         }
-        fmla.push(Rc::new(clause));
+		let hs: i64 = clause_hash(&clause);
+		match fmla.get_mut(&hs) {
+          None => { 
+			fmla.insert(hs, vec![(ctr, Rc::new(clause))]); 
+			()
+		  },
+		  Some(bkt) => {
+			bkt.push((ctr, Rc::new(clause))); 
+			() 
+		  }
+		}
+		ctr += 1;
       }
     },
     _ => panic!("parse DIMACS failed")

@@ -398,8 +398,21 @@ fn find_new_watch(c: &Clause, va: &VAssign) -> Option<usize> {
   c.iter().skip(2).position(|x| va.val(*x).is_none()).map(|u| u+2)
 }
 
-fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io::Result<()> {
-  let mut k = cnf.len() as u64; // Counter for the last used ID
+fn clause_hash(c: &Vec<i64>) -> i64 {
+  c.into_iter().sum()
+}
+
+fn find_input_clause(cnf: &HashMap<i64, Vec<(u64, dimacs::Clause)>>, ls: &Clause) -> u64 {
+  let hs = clause_hash(ls);
+  let bkt = cnf.get(&hs).unwrap();
+  let (j, _) = bkt.iter().find(|x| is_perm(&x.1, ls)).unwrap();
+  *j
+}
+
+fn trim<W: Write>(cnt: usize, cnf: HashMap<i64, Vec<(u64, dimacs::Clause)>>,
+  temp: File, lrat: &mut W) -> io::Result<()> {
+
+  let mut k = cnt as u64; // Counter for the last used ID
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
   let mut bp = ElabStepParser::<Bin>::new(temp)?.peekable();
 
@@ -410,8 +423,9 @@ fn trim_bin<W: Write>(cnf: Vec<dimacs::Clause>, temp: File, lrat: &mut W) -> io:
     match s {
 
       ElabStep::Orig(i, ls) => {
-        let j = cnf.iter().position(|x| is_perm(x, &ls)).unwrap_or_else( // Find position of clause in original problem
-          || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls)) as u64 + 1;
+        // let j = cnf.iter().position(|x| is_perm(x, &ls)).unwrap_or_else( // Find position of clause in original problem
+        //   || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls)) as u64 + 1;
+        let j = find_input_clause(&cnf, &ls);
         assert!(m.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
         // eprintln!("{} -> {}", i, j);
         if ls.is_empty() {
@@ -476,12 +490,12 @@ fn main() -> io::Result<()> {
   eprintln!("parsing DIMACS...");
 
   let temp_read = File::open(temp_path)?;
-  let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
+  let (cnt, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
   eprintln!("trimming...");
   if let Some(p) = args.next() {
-    trim_bin(cnf, temp_read, &mut BufWriter::new(File::create(p)?))?;
+    trim(cnt, cnf, temp_read, &mut BufWriter::new(File::create(p)?))?;
   } else {
-    trim_bin(cnf, temp_read, &mut io::sink())?;
+    trim(cnt, cnf, temp_read, &mut io::sink())?;
   }
 
   Ok(())
