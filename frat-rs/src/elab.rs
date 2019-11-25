@@ -73,8 +73,20 @@ impl IndexMut<usize> for Clause {
 struct Context {
   clauses: HashMap<u64, Clause>,
   units: HashMap<u64, i64>,
-  watch: HashMap<i64, HashMap<u64, ()>>,
+  watch: Option<HashMap<i64, HashMap<u64, ()>>>,
   step: Option<u64>
+}
+
+fn del_watch(watch: &mut HashMap<i64, HashMap<u64, ()>>, l: i64, i: u64) {
+  // eprintln!("remove watch: {:?} for {:?}", l, i);
+
+  assert!(watch.get_mut(&l).unwrap().remove(&i).is_some(),
+    "Literal {} not watched in clause {:?}", l, i);
+}
+
+fn add_watch(watch: &mut HashMap<i64, HashMap<u64, ()>>, l: i64, id: u64) {
+  assert!(watch.entry(l).or_insert_with(HashMap::new).insert(id, ()).is_none(),
+    "Clause already watched");
 }
 
 impl Context {
@@ -89,16 +101,17 @@ impl Context {
     self.clauses.get_mut(&i).unwrap().marked = true;
   }
 
-  fn del_watch(&mut self, l: i64, i: u64) {
-    // eprintln!("remove watch: {:?} for {:?}", l, i);
-
-    assert!(self.watch.get_mut(&l).unwrap().remove(&i).is_some(),
-      "Literal {} not watched in clause {:?}", l, i);
-  }
-
-  fn add_watch(&mut self, l: i64, id: u64) {
-    assert!(self.watch.entry(l).or_insert_with(HashMap::new).insert(id, ()).is_none(),
-      "Clause already watched");
+  fn watch(&mut self) -> &mut HashMap<i64, HashMap<u64, ()>> {
+    self.watch.get_or_insert_with({ let cl = &self.clauses; move || {
+      let mut watch = HashMap::new();
+      for (&i, c) in cl {
+        if c.len() >= 2 {
+          add_watch(&mut watch, c[0], i);
+          add_watch(&mut watch, c[1], i);
+        }
+      }
+      watch
+    }})
   }
 
   fn insert(&mut self, i: u64, marked: bool, lits: Vec<i64>) {
@@ -106,9 +119,9 @@ impl Context {
     match c.len() {
       0 => {}
       1 => { self.units.insert(i, c[0]); }
-      _ => {
-        self.add_watch(c[0], i);
-        self.add_watch(c[1], i);
+      _ => if let Some(w) = &mut self.watch {
+        add_watch(w, c[0], i);
+        add_watch(w, c[1], i);
       }
     }
 
@@ -124,9 +137,9 @@ impl Context {
     match c.len() {
       0 => {}
       1 => { self.units.remove(&i); }
-      _ => {
-        self.del_watch(c[0], i);
-        self.del_watch(c[1], i);
+      _ => if let Some(w) = &mut self.watch {
+        del_watch(w, c[0], i);
+        del_watch(w, c[1], i);
       }
     }
 
@@ -147,9 +160,11 @@ impl Context {
       assert!(self.clauses.insert(from, c).is_none(),
         "at {:?}: Clause {} to be inserted already exists", self.step, from);
     }
-    for (_, ws) in self.watch.iter_mut() {
-      for (n, _) in mem::replace(ws, HashMap::new()) {
-        ws.insert(m.get(&n).cloned().unwrap_or(n), ());
+    if let Some(watch) = &mut self.watch {
+      for (_, ws) in watch.iter_mut() {
+        for (n, _) in mem::replace(ws, HashMap::new()) {
+          ws.insert(m.get(&n).cloned().unwrap_or(n), ());
+        }
       }
     }
   }
@@ -170,8 +185,9 @@ impl Context {
       let k = c[j];
       c[0] = k;
       c[j] = l;
-      self.del_watch(l, i);
-      self.add_watch(k, i);
+      let w = self.watch();
+      del_watch(w, l, i);
+      add_watch(w, k, i);
       true
     } else {false}
   }
@@ -187,8 +203,9 @@ impl Context {
       let k = c[j];
       c[1] = k;
       c[j] = l;
-      self.del_watch(l, i);
-      self.add_watch(k, i);
+      let w = self.watch();
+      del_watch(w, l, i);
+      add_watch(w, k, i);
       true
     } else {false}
   }
@@ -229,10 +246,9 @@ impl Hint {
 
   fn minimize(&mut self, ctx: &Context) {
     let mut need = vec![false; self.steps.len()];
-    match need.last_mut() {
-      None => panic!("Failed, found a hint with {:?} reasons, {:?} steps", self.reasons.len(), self.steps.len()),
-      Some(last_step) => *last_step = true
-    }
+    *need.last_mut().unwrap_or_else(
+      || panic!("at {:?}: minimizing empty hint", ctx.step)) = true;
+
     for (i, &s) in self.steps.iter().enumerate().rev() {
       if need[i] {
         for l in ctx.get(s) {
@@ -265,7 +281,7 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
   // Main unit propagation loop
   while let Some(l) = ls.pop_front() {
     // If l is not watched at all, no new information can be obtained by propagating l
-    if let Some(is) = ctx.watch.get(&-l) {
+    if let Some(is) = ctx.watch().get(&-l) {
       // 'is' is the (reference to) IDs of all clauses containing -l
       let js: Vec<u64> = is.keys().cloned().collect();
       for j in js {
@@ -285,7 +301,7 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
 
 fn propagate_stuck(ctx: &Context, ht: &Hint, ls: &VecDeque<i64>, c: &Vec<i64>) -> io::Result<()> {
   // If unit propagation is stuck, write an error log
-  let mut log = File::create("unit_prop_error_log")?;
+  let mut log = File::create("unit_prop_error.log")?;
   writeln!(log, "Clauses available at failure:\n")?;
   for ac in &ctx.clauses {
     writeln!(log, "{:?}: {:?}", ac.0, ac.1.lits)?;
@@ -331,22 +347,11 @@ fn propagate_hint(ls: &Vec<i64>, ctx: &Context, is: &Vec<u64>, strict: bool) -> 
   }
 }
 
-fn undelete<W: Write>(is: &Vec<u64>, ctx: &mut Context, w: &mut W) {
-  for &i in is {
-    // let v = cs.get_mut(&i).unwrap();
-    if !ctx.marked(i) { // If the necessary clause is not active yet
-      ctx.mark(i); // Make it active
-      ElabStep::Del(i).write(w).expect("Failed to write delete step");
-    }
-  }
-}
-
 fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
   let w = &mut BufWriter::new(temp);
-  let mut bp = StepParser::<M>::new(frat)?;
   let mut ctx: Context = Context::new();
 
-  while let Some(s) = bp.next() {
+  for s in StepParser::<M>::new(frat)? {
     // eprintln!("<- {:?}", s);
     match s {
 
@@ -367,7 +372,13 @@ fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
             _ => None
           }.unwrap_or_else(|| propagate(&ls, &mut ctx));
           ht.minimize(&ctx);
-          undelete(&ht.steps, &mut ctx, w);
+          for &i in &ht.steps {
+            // let v = cs.get_mut(&i).unwrap();
+            if !ctx.marked(i) { // If the necessary clause is not active yet
+              ctx.mark(i); // Make it active
+              ElabStep::Del(i).write(w).expect("Failed to write delete step");
+            }
+          }
           ElabStep::Add(i, ls, ht.steps).write(w).expect("Failed to write add step");
         }
       }
