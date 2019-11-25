@@ -510,7 +510,8 @@ fn check_lrat<M: Mode>(mode: M, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Resu
         k = i;
         // eprintln!("{}: {:?} {:?}", k, ls, p);
         let p = p.into_iter().map(|i| i.try_into().unwrap()).collect();
-        propagate_hint(&ls, &ctx, &p, true);
+        propagate_hint(&ls, &ctx, p, true);
+        if ls.is_empty() { return Ok(()) }
         ctx.insert(i, true, ls);
       }
 
@@ -521,7 +522,7 @@ fn check_lrat<M: Mode>(mode: M, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Resu
     }
   }
 
-  Ok(())
+  panic!("did not find empty clause")
 }
 
 pub fn lratchk<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
