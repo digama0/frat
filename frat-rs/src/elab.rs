@@ -293,7 +293,7 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
   panic!("Unit propagation stuck");
 }
 
-fn propagate_hint(ls: &Vec<i64>, ctx: &Context, is: &Vec<u64>) -> Option<Hint> {
+fn propagate_hint(ls: &Vec<i64>, ctx: &Context, is: &Vec<u64>, strict: bool) -> Option<Hint> {
   let mut ht: Hint = Hint { reasons: ls.iter().map(|&x| (-x, None)).collect(), steps: vec![] };
 
   let mut first = 0;
@@ -305,7 +305,7 @@ fn propagate_hint(ls: &Vec<i64>, ctx: &Context, is: &Vec<u64>) -> Option<Hint> {
       for l in ctx.get(c) {
         if !ht.reasons.contains_key(&-l) {
           if uf.replace(l).is_some() {
-            // eprintln!("bad hint {}: clause {:?} is not unit", step, c);
+            assert!(!strict, "at {:?}: clause {:?} is not unit", ctx.step, c);
             continue 'a
           }
         }
@@ -360,7 +360,7 @@ fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
         let c = ctx.remove(i);
         if c.marked {
           let mut ht: Hint = match p {
-            Some(Proof::LRAT(is)) => propagate_hint(&ls, &ctx, &is),
+            Some(Proof::LRAT(is)) => propagate_hint(&ls, &ctx, &is, false),
             _ => None
           }.unwrap_or_else(|| propagate(&ls, &mut ctx));
           ht.minimize(&ctx);
@@ -412,7 +412,7 @@ impl<'a> PartialEq for PermClause<'a> {
 }
 impl<'a> Eq for PermClause<'a> {}
 
-fn trim<W: Write>(cnf: Vec<Vec<i64>>, temp: File, lrat: &mut W) -> io::Result<()> {
+fn trim<W: Write>(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut W) -> io::Result<()> {
 
   let mut k = 0 as u64; // Counter for the last used ID
   let cnf: HashMap<PermClause, u64> = // original CNF
@@ -486,27 +486,32 @@ pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
   let mut frat = File::open(frat_path)?;
   let bin = detect_binary(&mut frat)?;
   let temp_write = File::create(&temp_path)?;
-  eprintln!("elaborating...");
+  println!("elaborating...");
   if bin { elab::<Bin>(frat, temp_write)? }
   else { elab::<Ascii>(frat, temp_write)? };
-  eprintln!("parsing DIMACS...");
+  println!("parsing DIMACS...");
 
   let temp_read = File::open(temp_path)?;
   let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
-  eprintln!("trimming...");
-  if let Some(p) = args.next() {
-    trim(cnf, temp_read, &mut BufWriter::new(File::create(p)?))?;
+  println!("trimming...");
+  if let Some(lrat_file) = args.next() {
+    trim(&cnf, temp_read, &mut BufWriter::new(File::create(&lrat_file)?))?;
+    match args.next() {
+      Some(ref s) if s == "-v" => {
+        println!("verifying...");
+        check_lrat(cnf, &lrat_file)?;
+        println!("VERIFIED");
+      }
+      _ => ()
+    }
   } else {
-    trim(cnf, temp_read, &mut io::sink())?;
+    trim(&cnf, temp_read, &mut io::sink())?;
   }
-
   Ok(())
 }
 
-pub fn lratchk<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
-  let dimacs = args.next().expect("missing input file");
-  let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
-  let lrat = File::open(args.next().expect("missing proof file"))?;
+fn check_lrat(cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Result<()> {
+  let lrat = File::open(lrat_file)?;
   let lp = LRATParser::from(BufReader::new(lrat).bytes().map(|x| x.unwrap() as char));
   let mut ctx: Context = Context::new();
   let mut k = 0;
@@ -514,6 +519,7 @@ pub fn lratchk<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
   for c in cnf {
     k += 1;
     ctx.step = Some(k);
+    // eprintln!("{}: {:?}", k, c);
     ctx.insert(k, true, c);
   }
 
@@ -525,8 +531,9 @@ pub fn lratchk<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
       LRATStep::Add(ls, p) => {
         assert!(i > k, "out-of-order LRAT proofs not supported");
         k = i;
+        // eprintln!("{}: {:?} {:?}", k, ls, p);
         let p = p.into_iter().map(|i| i.try_into().unwrap()).collect();
-        propagate_hint(&ls, &ctx, &p);
+        propagate_hint(&ls, &ctx, &p, true);
         ctx.insert(i, true, ls);
       }
 
@@ -538,5 +545,11 @@ pub fn lratchk<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
   }
 
   Ok(())
+}
+
+pub fn lratchk<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
+  let dimacs = args.next().expect("missing input file");
+  let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
+  check_lrat(cnf, &args.next().expect("missing proof file"))
 }
 
