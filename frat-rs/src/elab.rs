@@ -293,19 +293,20 @@ fn propagate_stuck(ctx: &Context, ht: &Hint, ls: &VecDeque<i64>, c: &Vec<i64>) -
   writeln!(log, "\nFailed to add clause: {:?}", c)
 }
 
-fn propagate_hint(ls: &Vec<i64>, ctx: &Context, is: &Vec<u64>, strict: bool) -> Option<Hint> {
+fn propagate_hint(ls: &Vec<i64>, ctx: &Context, mut is: Vec<u64>, strict: bool) -> Option<Hint> {
   let mut ht: Hint = Hint { reasons: ls.iter().map(|&x| (-x, None)).collect(), steps: vec![] };
 
-  let mut first = 0;
+  let mut queue = vec![];
   loop {
-    let mut progress = false;
-    'a: for i in first..is.len() {
-      let c = is[i];
+    let len = is.len();
+    'a: for c in is.drain(..) {
       let mut uf: Option<i64> = None;
-      for l in ctx.get(c) {
+      let cl = ctx.get(c);
+      for l in cl {
         if !ht.reasons.contains_key(&-l) {
           if uf.replace(l).is_some() {
             assert!(!strict, "at {:?}: clause {:?} is not unit", ctx.step, c);
+            queue.push(c);
             continue 'a
           }
         }
@@ -320,11 +321,10 @@ fn propagate_hint(ls: &Vec<i64>, ctx: &Context, is: &Vec<u64>, strict: bool) -> 
           ht.steps.push(c);
         }
       }
-      progress = true;
-      if first == i { first += 1 }
     }
-    assert!(progress,
-      "at {:?}: unit propagation failed to find conflict", ctx.step)
+    assert!(queue.len() < len,
+      "at {:?}: unit propagation failed to find conflict", ctx.step);
+    mem::swap(&mut is, &mut queue);
   }
 }
 
@@ -349,7 +349,7 @@ fn elab<M: Mode>(mode: M, frat: File, temp: File) -> io::Result<()> {
         let c = ctx.remove(i);
         if c.marked {
           let mut ht: Hint = match p {
-            Some(Proof::LRAT(is)) => propagate_hint(&ls, &ctx, &is, false),
+            Some(Proof::LRAT(is)) => propagate_hint(&ls, &ctx, is, false),
             _ => None
           }.unwrap_or_else(|| propagate(&ls, &mut ctx));
           ht.minimize(&ctx);
