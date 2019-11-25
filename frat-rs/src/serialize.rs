@@ -1,6 +1,6 @@
 use arrayvec::ArrayVec;
 use std::io::{self, Write};
-use super::backparser::{Step, ElabStep, Proof};
+use super::parser::{Step, StepRef, ElabStep, ProofRef};
 
 pub trait Serialize {
   fn write<W: Write>(&self, w: &mut W) -> io::Result<()>;
@@ -48,20 +48,26 @@ impl Serialize for i64 {
   }
 }
 
-impl Serialize for Step {
+impl<'a> Serialize for StepRef<'a> {
   fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
     match *self {
-      Step::Orig(idx, ref vec) => ('o', (idx, vec)).write(w),
-      Step::Add(idx, ref vec, None) => ('a', (idx, vec)).write(w),
-      Step::Add(idx, ref vec, Some(Proof::Sorry)) =>
+      StepRef::Orig(idx, vec) => ('o', (idx, vec)).write(w),
+      StepRef::Add(idx, vec, None) => ('a', (idx, vec)).write(w),
+      StepRef::Add(idx, vec, Some(ProofRef::Sorry)) =>
         (('t', (127u8, 0u8)), ('a', (idx, vec))).write(w),
-      Step::Add(idx, ref vec, Some(Proof::LRAT(ref steps))) =>
+      StepRef::Add(idx, vec, Some(ProofRef::LRAT(steps))) =>
         (('a', (idx, vec)), ('l', steps)).write(w),
-      Step::Reloc(ref relocs) => ('r', relocs).write(w),
-      Step::Del(idx, ref vec) => ('d', (idx, vec)).write(w),
-      Step::Final(idx, ref vec) => ('f', (idx, vec)).write(w),
-      Step::Todo(idx) => ('t', (idx, 0u8)).write(w),
+      StepRef::Reloc(relocs) => ('r', relocs).write(w),
+      StepRef::Del(idx, vec) => ('d', (idx, vec)).write(w),
+      StepRef::Final(idx, vec) => ('f', (idx, vec)).write(w),
+      StepRef::Todo(idx) => ('t', (idx, 0u8)).write(w),
     }
+  }
+}
+
+impl Serialize for Step {
+  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    self.as_ref().write(w)
   }
 }
 

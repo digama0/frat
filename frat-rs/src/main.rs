@@ -1,10 +1,12 @@
 mod dimacs;
 mod parser;
 mod backparser;
+mod perm_clause;
 mod elab;
 mod fratchk;
 mod dratchk;
 mod serialize;
+mod from_drat;
 
 use std::env;
 use std::io;
@@ -16,6 +18,7 @@ fn main() -> io::Result<()> {
     "fratchk" => fratchk::main(args),
     "dratchk" => dratchk::main(args),
     "lratchk" => elab::lratchk(args),
+    "from-drat" => from_drat::main(args),
     _ => panic!("incorrect subcommand, expected {elab, fratchk, dratchk, lratchk}")
   }
 }

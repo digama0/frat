@@ -1,16 +1,15 @@
-// use std::process::exit;
 use std::io::{self, Read, BufReader, Write, BufWriter};
 use std::fs::{File, read_to_string};
 use std::convert::TryInto;
 use std::collections::VecDeque;
 use std::mem;
-use std::hash::{Hash, Hasher};
-use std::num::Wrapping;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 use hashbrown::hash_map::{HashMap, Entry};
-use super::dimacs::{parse_dimacs, LRATParser, LRATStep};
+use super::dimacs::parse_dimacs;
 use super::serialize::Serialize;
-use super::backparser::*;
+use super::parser::{detect_binary, Mode, Ascii, Bin, LRATParser, LRATStep};
+use super::backparser::{StepParser, Step, ElabStepParser, ElabStep, Proof};
+use super::perm_clause::*;
 
 struct VAssign {
   values: Vec<Option<bool>>
@@ -329,11 +328,11 @@ fn propagate_hint(ls: &Vec<i64>, ctx: &Context, is: &Vec<u64>, strict: bool) -> 
   }
 }
 
-fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
+fn elab<M: Mode>(mode: M, frat: File, temp: File) -> io::Result<()> {
   let w = &mut BufWriter::new(temp);
   let mut ctx: Context = Context::new();
 
-  for s in StepParser::<M>::new(frat)? {
+  for s in StepParser::new(mode, frat)? {
     // eprintln!("<- {:?}", s);
     match s {
 
@@ -384,46 +383,28 @@ fn elab<M: Mode>(frat: File, temp: File) -> io::Result<()> {
     }
   }
 
-  Ok(())
+  w.flush()
 }
 
 fn find_new_watch(c: &Clause, va: &VAssign) -> Option<usize> {
   c.iter().skip(2).position(|x| va.val(*x).is_none()).map(|u| u+2)
 }
 
-#[derive(Copy, Clone)]
-struct PermClause<'a>(&'a Vec<i64>);
-
-impl<'a> Hash for PermClause<'a> {
-  fn hash<H: Hasher>(&self, h: &mut H) {
-    // Permutation-stable hash function from drat-trim.c
-    let (mut sum, mut prod, mut xor) = (Wrapping(0u64), Wrapping(1u64), Wrapping(0u64));
-    for &i in self.0 { let i = Wrapping(i as u64); prod *= i; sum += i; xor ^= i; }
-    (Wrapping(1023) * sum + prod ^ (Wrapping(31) * xor)).hash(h)
-  }
-}
-
-impl<'a> PartialEq for PermClause<'a> {
-  fn eq(&self, other: &Self) -> bool { is_perm(&self.0, &other.0) }
-}
-impl<'a> Eq for PermClause<'a> {}
-
 fn trim<W: Write>(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut W) -> io::Result<()> {
 
   let mut k = 0 as u64; // Counter for the last used ID
-  let cnf: HashMap<PermClause, u64> = // original CNF
-    cnf.iter().map(|c| (PermClause(c), (k += 1, k).1)).collect();
+  let cnf: HashMap<PermClauseRef, u64> = // original CNF
+    cnf.iter().map(|c| (PermClauseRef(c), (k += 1, k).1)).collect();
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
-  let mut bp = ElabStepParser::<Bin>::new(temp)?.peekable();
+  let mut bp = ElabStepParser::new(Bin, temp)?.peekable();
 
-  loop {
-    let s = bp.next().expect("did not find empty clause");
+  while let Some(s) = bp.next() {
     // eprintln!("-> {:?}", s);
 
     match s {
 
       ElabStep::Orig(i, ls) => {
-        let j = *cnf.get(&PermClause(&ls)).unwrap_or_else( // Find position of clause in original problem
+        let j = *cnf.get(&PermClauseRef(&ls)).unwrap_or_else( // Find position of clause in original problem
           || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls));
         assert!(m.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
         // eprintln!("{} -> {}", i, j);
@@ -468,10 +449,8 @@ fn trim<W: Write>(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut W) -> io::Result<(
       }
     }
   }
-}
 
-fn is_perm(v: &Vec<i64>, w: &Vec<i64>) -> bool {
-  v.len() == w.len() && v.iter().all(|i| w.contains(i))
+  panic!("did not find empty clause");
 }
 
 pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
@@ -483,19 +462,21 @@ pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
   let bin = detect_binary(&mut frat)?;
   let temp_write = File::create(&temp_path)?;
   println!("elaborating...");
-  if bin { elab::<Bin>(frat, temp_write)? }
-  else { elab::<Ascii>(frat, temp_write)? };
+  if bin { elab(Bin, frat, temp_write)? }
+  else { elab(Ascii, frat, temp_write)? };
   println!("parsing DIMACS...");
 
   let temp_read = File::open(temp_path)?;
   let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
   println!("trimming...");
   if let Some(lrat_file) = args.next() {
-    trim(&cnf, temp_read, &mut BufWriter::new(File::create(&lrat_file)?))?;
+    let mut lrat = BufWriter::new(File::create(&lrat_file)?);
+    trim(&cnf, temp_read, &mut lrat)?;
+    lrat.flush()?;
     match args.next() {
       Some(ref s) if s == "-v" => {
         println!("verifying...");
-        check_lrat(cnf, &lrat_file)?;
+        check_lrat(Ascii, cnf, &lrat_file)?;
         println!("VERIFIED");
       }
       _ => ()
@@ -506,9 +487,9 @@ pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
   Ok(())
 }
 
-fn check_lrat(cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Result<()> {
+fn check_lrat<M: Mode>(mode: M, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Result<()> {
   let lrat = File::open(lrat_file)?;
-  let lp = LRATParser::from(BufReader::new(lrat).bytes().map(|x| x.unwrap() as char));
+  let lp = LRATParser::from(mode, BufReader::new(lrat).bytes().map(Result::unwrap));
   let mut ctx: Context = Context::new();
   let mut k = 0;
 
@@ -546,6 +527,6 @@ fn check_lrat(cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Result<()> {
 pub fn lratchk<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
   let dimacs = args.next().expect("missing input file");
   let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
-  check_lrat(cnf, &args.next().expect("missing proof file"))
+  check_lrat(Ascii, cnf, &args.next().expect("missing proof file"))
 }
 

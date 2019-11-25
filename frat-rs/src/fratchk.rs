@@ -2,6 +2,7 @@ use std::fs::File;
 use std::process::exit;
 use hashbrown::hash_map::HashMap;
 use std::io;
+use super::parser::{detect_binary, Mode, Ascii, Bin};
 use super::backparser::*;
 
 type Clause = Vec<i64>;
@@ -17,8 +18,8 @@ fn check_proof_step(_active: &mut HashMap<u64, (bool, Clause)>, _cl: &Clause, p:
   }
 }
 
-pub fn check_proof<M: Mode>(proof: File) -> io::Result<()> {
-  let mut bp = StepParser::<M>::new(proof)?.peekable();
+pub fn check_proof<M: Mode>(mode: M, proof: File) -> io::Result<()> {
+  let mut bp = StepParser::new(mode, proof)?.peekable();
   let (mut orig, mut added, mut deleted, mut fin) = (0i64, 0i64, 0i64, 0i64);
   let (mut dirty_orig, mut dirty_add, mut double_del, mut double_fin) = (0i64, 0i64, 0i64, 0i64);
   let mut missing = 0i64;
@@ -132,6 +133,6 @@ pub fn check_proof<M: Mode>(proof: File) -> io::Result<()> {
 pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
   let mut proof = File::open(args.next().expect("missing proof file"))?;
   let bin = detect_binary(&mut proof)?;
-  if bin { check_proof::<Bin>(proof) }
-  else { check_proof::<Ascii>(proof) }
+  if bin { check_proof(Bin, proof) }
+  else { check_proof(Ascii, proof) }
 }
