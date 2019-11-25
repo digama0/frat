@@ -1,12 +1,13 @@
 // use std::process::exit;
-use std::io::{self, Write, BufWriter};
+use std::io::{self, Read, BufReader, Write, BufWriter};
 use std::fs::{File, read_to_string};
+use std::convert::TryInto;
 use std::mem;
 use std::hash::{Hash, Hasher};
 use std::num::Wrapping;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 use hashbrown::hash_map::{HashMap, Entry};
-use super::dimacs::parse_dimacs;
+use super::dimacs::{parse_dimacs, LRATParser, LRATStep};
 use super::serialize::Serialize;
 use super::backparser::*;
 
@@ -501,3 +502,41 @@ pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
 
   Ok(())
 }
+
+pub fn lratchk<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
+  let dimacs = args.next().expect("missing input file");
+  let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
+  let lrat = File::open(args.next().expect("missing proof file"))?;
+  let lp = LRATParser::from(BufReader::new(lrat).bytes().map(|x| x.unwrap() as char));
+  let mut ctx: Context = Context::new();
+  let mut k = 0;
+
+  for c in cnf {
+    k += 1;
+    ctx.step = Some(k);
+    ctx.insert(k, true, c);
+  }
+
+  for (i, s) in lp {
+    ctx.step = Some(i);
+    // eprintln!("{:?}", s);
+    match s {
+
+      LRATStep::Add(ls, p) => {
+        assert!(i > k, "out-of-order LRAT proofs not supported");
+        k = i;
+        let p = p.into_iter().map(|i| i.try_into().unwrap()).collect();
+        propagate_hint(&ls, &ctx, &p);
+        ctx.insert(i, true, ls);
+      }
+
+      LRATStep::Del(ls) => {
+        assert!(i == k, "out-of-order LRAT proofs not supported");
+        for c in ls { ctx.remove(c.try_into().unwrap()); }
+      }
+    }
+  }
+
+  Ok(())
+}
+

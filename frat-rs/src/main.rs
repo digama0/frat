@@ -12,9 +12,10 @@ use std::io;
 fn main() -> io::Result<()> {
   let mut args = env::args().skip(1);
   match args.next().expect("expected a subcommand").as_str() {
+    "elab" => elab::main(args),
     "fratchk" => fratchk::main(args),
     "dratchk" => dratchk::main(args),
-    "elab" => elab::main(args),
-    _ => panic!("incorrect arguments")
+    "lratchk" => elab::lratchk(args),
+    _ => panic!("incorrect subcommand, expected {elab, fratchk, dratchk, lratchk}")
   }
 }

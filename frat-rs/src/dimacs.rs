@@ -7,12 +7,12 @@ enum Token {
 use self::Token::*;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum Ident { Comment, Problem, Cnf }
+enum Ident { Comment, Problem, Cnf, Del }
 
 use self::Ident::*;
 
 #[derive(Debug, Clone)]
-struct Lexer<I> where I: Iterator<Item=char> {
+struct Lexer<I: Iterator<Item=char>> {
 	/// input iterator
 	input : I,
 
@@ -23,7 +23,7 @@ struct Lexer<I> where I: Iterator<Item=char> {
 	peek  : char,
 }
 
-impl<I> Lexer<I> where I: Iterator<Item=char> {
+impl<I: Iterator<Item=char>> Lexer<I> {
 	fn from(input: I) -> Lexer<I> {
 		let mut lex = Lexer {
 			input : input,
@@ -65,10 +65,11 @@ impl<I> Lexer<I> where I: Iterator<Item=char> {
       } else { panic!("unknown keyword") }
     }
 		match self.buffer.as_str() {
-			"c"     => self.scan_comment(),
-			"p"     => Problem,
-			"cnf"   => Cnf,
-			_       => panic!("unknown keyword")
+			"c"   => self.scan_comment(),
+			"p"   => Problem,
+			"cnf" => Cnf,
+			"d"   => Del,
+			_     => panic!("unknown keyword")
     }
   }
 
@@ -83,7 +84,7 @@ impl<I> Lexer<I> where I: Iterator<Item=char> {
   }
 }
 
-impl<I> Iterator for Lexer<I> where I: Iterator<Item=char> {
+impl<I: Iterator<Item=char>> Iterator for Lexer<I> {
 	type Item = Token;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -124,4 +125,42 @@ pub fn parse_dimacs<I: Iterator<Item=char>>(input: I) -> (usize, Vec<Clause>) {
     },
     _ => panic!("parse DIMACS failed")
   }
+}
+
+pub struct LRATParser<I: Iterator<Item=char>>(std::iter::Peekable<Lexer<I>>);
+
+impl<I: Iterator<Item=char>> LRATParser<I> {
+	pub fn from(input: I) -> Self { LRATParser(Lexer::from(input).peekable()) }
+
+	fn read_vec(&mut self) -> Vec<i64> {
+		let mut vec = Vec::new();
+		loop {
+			match self.0.next() {
+				Some(Nat(0)) => return vec,
+				Some(Nat(lit)) => vec.push(lit),
+				_ => panic!("parse failed")
+			}
+		}
+	}
+}
+
+pub enum LRATStep {
+	Add(Vec<i64>, Vec<i64>),
+	Del(Vec<i64>)
+}
+
+impl<I: Iterator<Item=char>> Iterator for LRATParser<I> {
+	type Item = (u64, LRATStep);
+	fn next(&mut self) -> Option<(u64, LRATStep)> {
+		Some((
+			match self.0.next()? {
+				Nat(st) if st > 0 => st as u64,
+				_ => panic!("parse failed")
+			},
+			match self.0.peek() {
+				Some(Ident(Del)) => { self.0.next(); LRATStep::Del(self.read_vec()) }
+				_ => LRATStep::Add(self.read_vec(), self.read_vec())
+			}
+		))
+	}
 }
