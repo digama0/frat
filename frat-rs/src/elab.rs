@@ -2,6 +2,7 @@
 use std::io::{self, Read, BufReader, Write, BufWriter};
 use std::fs::{File, read_to_string};
 use std::convert::TryInto;
+use std::collections::VecDeque;
 use std::mem;
 use std::hash::{Hash, Hasher};
 use std::num::Wrapping;
@@ -230,8 +231,8 @@ impl Hint {
     let mut need = vec![false; self.steps.len()];
     match need.last_mut() {
       None => panic!("Failed, found a hint with {:?} reasons, {:?} steps", self.reasons.len(), self.steps.len()),
-      Some(last_step) => *last_step = true 
-    } 
+      Some(last_step) => *last_step = true
+    }
     for (i, &s) in self.steps.iter().enumerate().rev() {
       if need[i] {
         for l in ctx.get(s) {
@@ -243,72 +244,56 @@ impl Hint {
   }
 }
 
-// Propagate literal l. Returns false if a contradiction has been found
-fn propagate_one(l: i64, ls: &mut Vec<i64>, ctx: &mut Context, va: &mut VAssign, ht: &mut Hint) -> bool {
-
-  // If l is not watched at all, no new information can be obtained by propagating l
-  if let Some(is) = ctx.watch.get(&-l) {
-    // 'is' is the (reference to) IDs of all clauses containing -l
-    let js: Vec<u64> = is.keys().cloned().collect();
-    for j in js {
-      if let Some(k) = ctx.propagate(j, va) {
-        ls.push(k);
-        ht.add(k, Some(j));
-        if !va.set(k) { return false }
-      }
-    }
-  }
-  true
-}
-
 fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
 
-  let mut ls: Vec<i64> = Vec::new();
+  let mut ls: VecDeque<i64> = VecDeque::new();
   let mut va = VAssign::new();
   let mut ht = Hint::new();
 
   for l in c {
-    ls.push(-l);
+    ls.push_back(-l);
     ht.add(-l, None);
     if !va.set(-l) { return ht }
   }
 
   for (&i, &l) in &ctx.units {
-    ls.push(l);
+    ls.push_back(l);
     ht.add(l, Some(i));
     if !va.set(l) { return ht }
   }
 
   // Main unit propagation loop
-
-  // ctr is the counter which keeps track of the literals of uls that
-  // has already been used for unit propagtion. It always points to the
-  // next fresh literal to be propagated (a simpler iteration over ls 
-  // doesn't work here because ls itself is growing).
-  let mut ctr: usize = 0;
-  // Main unit propagation loop
-  'prop: loop {
-    // If there are no more literals to propagate, unit propagation has failed
-    if ls.len() <= ctr { propagate_stuck(ctx, &ht, &ls, c)
-      .expect("Failed to write unit propagation error log"); }
-    if !propagate_one(ls[ctr], &mut ls, ctx, &mut va, &mut ht) { return ht; }
-    ctr += 1;
-    continue 'prop;
+  while let Some(l) = ls.pop_front() {
+    // If l is not watched at all, no new information can be obtained by propagating l
+    if let Some(is) = ctx.watch.get(&-l) {
+      // 'is' is the (reference to) IDs of all clauses containing -l
+      let js: Vec<u64> = is.keys().cloned().collect();
+      for j in js {
+        if let Some(k) = ctx.propagate(j, &va) {
+          ls.push_back(k);
+          ht.add(k, Some(j));
+          if !va.set(k) { return ht }
+        }
+      }
+    }
   }
+
+  // If there are no more literals to propagate, unit propagation has failed
+  let _ = propagate_stuck(ctx, &ht, &ls, c);
+  panic!("Unit propagation stuck, cannot add clause {:?}", c)
 }
 
-fn propagate_stuck(ctx: &Context, ht: &Hint, ls: &Vec<i64>, c: &Vec<i64>) -> io::Result<()> {
+fn propagate_stuck(ctx: &Context, ht: &Hint, ls: &VecDeque<i64>, c: &Vec<i64>) -> io::Result<()> {
   // If unit propagation is stuck, write an error log
-  let mut log = File::create("unit_prop_error_log").unwrap();
-  writeln!(log, "Clauses available at failure :\n")?;
+  let mut log = File::create("unit_prop_error_log")?;
+  writeln!(log, "Clauses available at failure:\n")?;
   for ac in &ctx.clauses {
-    writeln!(log, "{:?} : {:?}", ac.0, ac.1.lits)?;
+    writeln!(log, "{:?}: {:?}", ac.0, ac.1.lits)?;
   }
-  writeln!(log, "\nDiscovered reasons at failure : {:?}", ht.reasons)?;
-  writeln!(log, "\nRecorded steps at failure : {:?}", ht.steps)?;
-  writeln!(log, "\nObtained unit literals at failure : {:?}", ls)?;
-  writeln!(log, "\nFailed to add clause : {:?}", c)?;
-  panic!("Unit propagation stuck, cannot add clause {:?}", c);
+  writeln!(log, "\nDiscovered reasons at failure: {:?}", ht.reasons)?;
+  writeln!(log, "\nRecorded steps at failure: {:?}", ht.steps)?;
+  writeln!(log, "\nObtained unit literals at failure: {:?}", ls)?;
+  writeln!(log, "\nFailed to add clause: {:?}", c)
 }
 
 fn propagate_hint(ls: &Vec<i64>, ctx: &Context, is: &Vec<u64>, strict: bool) -> Option<Hint> {
