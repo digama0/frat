@@ -191,12 +191,14 @@ impl Context {
     } else {false}
   }
 
+  // m indicates propagation targets (m == true for marked clauses),
   // va is the current variable assignment, and i is the ID of a clause
   // which may potentially be unit under va. If c is verified under va,
   // do nothing and return None. If c is not verified but contains two
   // or more undecided literals, watch them and return none. Otherwise,
   // return Some(k), where k is a new unit literal.
-  fn propagate(&mut self, i: u64, va: &VAssign) -> Option<i64> {
+  fn propagate(&mut self, m: bool, i: u64, va: &VAssign) -> Option<i64> {
+    if m != self.marked(i) {return None}
     if self.get(i).iter().any(|&l| va.val(l) == Some(true)) {return None}
     if !self.watch_idx(0, i, va) {return Some(self.get(i)[1])}
     if !self.watch_idx(1, i, va) {return Some(self.get(i)[0])}
@@ -241,33 +243,45 @@ impl Hint {
   }
 }
 
+// Return the next literal to be propagated, and indicate whether 
+// its propagation should be limited to marked/unmarked clauses
+fn next_prop_lit(ls0: &mut VecDeque<i64>, ls1: &mut VecDeque<i64>) -> Option<(bool, i64)> {
+  if let Some(l) = ls0.pop_front() { return Some((true, l)); }
+  if let Some(l) = ls1.pop_front() { return Some((false, l)); }
+  None
+}
+
 fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
 
-  let mut ls: VecDeque<i64> = VecDeque::new();
+  let mut ls0: VecDeque<i64> = VecDeque::new();
+  let mut ls1: VecDeque<i64> = VecDeque::new();
   let mut va = VAssign::new();
   let mut ht = Hint::new();
 
   for l in c {
-    ls.push_back(-l);
+    ls0.push_back(-l);
+    ls1.push_back(-l);
     ht.add(-l, None);
     if !va.set(-l) { return ht }
   }
 
   for (&i, &l) in &ctx.units {
-    ls.push_back(l);
+    ls0.push_back(l);
+    ls1.push_back(l);
     ht.add(l, Some(i));
     if !va.set(l) { return ht }
   }
 
   // Main unit propagation loop
-  while let Some(l) = ls.pop_front() {
+  while let Some((m, l)) = next_prop_lit(&mut ls0, &mut ls1) {
     // If l is not watched at all, no new information can be obtained by propagating l
     if let Some(is) = ctx.watch().get(&-l) {
-      // 'is' is the (reference to) IDs of all clauses containing -l
+      // 'is' contains (as keys) the IDs of all clauses containing -l
       let js: Vec<u64> = is.keys().cloned().collect();
       for j in js {
-        if let Some(k) = ctx.propagate(j, &va) {
-          ls.push_back(k);
+        if let Some(k) = ctx.propagate(m, j, &va) {
+          ls0.push_back(k);
+          ls1.push_back(k);
           ht.add(k, Some(j));
           if !va.set(k) { return ht }
         }
@@ -276,22 +290,22 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
   }
 
   // If there are no more literals to propagate, unit propagation has failed
-  let _ = propagate_stuck(ctx, &ht, &ls, c);
+  // let _ = propagate_stuck(ctx, &ht, &ls, c);
   panic!("Unit propagation stuck, cannot add clause {:?}", c)
 }
 
-fn propagate_stuck(ctx: &Context, ht: &Hint, ls: &VecDeque<i64>, c: &Vec<i64>) -> io::Result<()> {
-  // If unit propagation is stuck, write an error log
-  let mut log = File::create("unit_prop_error.log")?;
-  writeln!(log, "Clauses available at failure:\n")?;
-  for ac in &ctx.clauses {
-    writeln!(log, "{:?}: {:?}", ac.0, ac.1.lits)?;
-  }
-  writeln!(log, "\nDiscovered reasons at failure: {:?}", ht.reasons)?;
-  writeln!(log, "\nRecorded steps at failure: {:?}", ht.steps)?;
-  writeln!(log, "\nObtained unit literals at failure: {:?}", ls)?;
-  writeln!(log, "\nFailed to add clause: {:?}", c)
-}
+// fn propagate_stuck(ctx: &Context, ht: &Hint, ls: &VecDeque<i64>, c: &Vec<i64>) -> io::Result<()> {
+//   // If unit propagation is stuck, write an error log
+//   let mut log = File::create("unit_prop_error.log")?;
+//   writeln!(log, "Clauses available at failure:\n")?;
+//   for ac in &ctx.clauses {
+//     writeln!(log, "{:?}: {:?}", ac.0, ac.1.lits)?;
+//   }
+//   writeln!(log, "\nDiscovered reasons at failure: {:?}", ht.reasons)?;
+//   writeln!(log, "\nRecorded steps at failure: {:?}", ht.steps)?;
+//   writeln!(log, "\nObtained unit literals at failure: {:?}", ls)?;
+//   writeln!(log, "\nFailed to add clause: {:?}", c)
+// }
 
 fn propagate_hint(ls: &Vec<i64>, ctx: &Context, mut is: Vec<u64>, strict: bool) -> Option<Hint> {
   let mut ht: Hint = Hint { reasons: ls.iter().map(|&x| (-x, None)).collect(), steps: vec![] };

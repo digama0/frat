@@ -38,6 +38,7 @@ map_cut(_, []).
 map_cut(Goal, [Elem | List]) :- 
   call(Goal, Elem), !,
   map_cut(Goal, List).
+
 write_list([]).
 
 write_list([Elem | List]) :-
@@ -51,34 +52,6 @@ write_list(Stream, [Elem | List]) :-
   write(Stream, Elem),
   write(Stream, "\n"),
   write_list(Stream, List).
-
-file_write_list(Target, List) :-
-  open(Target, write, Stream),
-  write_list(Stream, List), 
-  close(Stream).
-
-negate(Num, Neg) :-
-  Neg is -Num.
-
-pluck([Elem | List], Elem, List).
-
-pluck([ElemA | List], ElemB, [ElemA | Rem]) :-
-  pluck(List, ElemB, Rem).
-
-
-read_bytes_core(Stream, Bytes) :-
-  get_code(Stream, Code),
-  ( 
-    Code = -1 -> 
-    Bytes = [] ;
-    ( Bytes = [Code | Rem],
-      read_bytes_core(Stream, Rem) ) 
-  ).
-
-read_bytes(Source, Bytes) :-
-  open(Source, read, Stream, [encoding(octet)]),
-  read_bytes_core(Stream, Bytes),
-  close(Stream).
 
 read_lines_core(Stream, Lines) :-
   read_line_to_codes(Stream, Line), 
@@ -230,5 +203,3 @@ main([CNF_FILE, LRAT_FILE]) :-
   write(Log, "\nLRAT proof: \n\n"),
   lrat_check(PROB, LRAT, Log),
   writeln(Log, "\nProof verified\n").
-
-% main(["/home/sk/projects/cnfs/3cnf_10_120.cnf", "test.lrat"]).
