@@ -174,34 +174,16 @@ impl Context {
       || panic!("at {:?}: Clause {} to be accessed does not exist", self.step, i))
   }
 
-  fn watch_first(&mut self, i: u64, va: &VAssign) -> bool {
+  #[inline] fn watch_idx(&mut self, idx: usize, i: u64, va: &VAssign) -> bool {
 
     let c = self.clauses.get_mut(&i).unwrap();
-    let l = c[0];
+    let l = c[idx];
 
     if va.val(l).is_none() { return true }
     if let Some(j) = find_new_watch(c, va) {
       // eprintln!("Working on clause {}: {:?} at {}", i, c, j);
       let k = c[j];
-      c[0] = k;
-      c[j] = l;
-      let w = self.watch();
-      del_watch(w, l, i);
-      add_watch(w, k, i);
-      true
-    } else {false}
-  }
-
-  fn watch_second(&mut self, i: u64, va: &VAssign) -> bool {
-
-    let c = self.clauses.get_mut(&i).unwrap();
-    let l = c[1];
-
-    if va.val(l).is_none() { return true }
-    if let Some(j) = find_new_watch(c, va) {
-      // eprintln!("Working on clause {} second: {:?} at {}", i, c, j);
-      let k = c[j];
-      c[1] = k;
+      c[idx] = k;
       c[j] = l;
       let w = self.watch();
       del_watch(w, l, i);
@@ -217,8 +199,8 @@ impl Context {
   // return Some(k), where k is a new unit literal.
   fn propagate(&mut self, i: u64, va: &VAssign) -> Option<i64> {
     if self.get(i).iter().any(|&l| va.val(l) == Some(true)) {return None}
-    if !self.watch_first(i, va) {return Some(self.get(i)[1])}
-    if !self.watch_second(i, va) {return Some(self.get(i)[0])}
+    if !self.watch_idx(0, i, va) {return Some(self.get(i)[1])}
+    if !self.watch_idx(1, i, va) {return Some(self.get(i)[0])}
     None
   }
 }
