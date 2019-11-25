@@ -1,6 +1,3 @@
-#[path="../dimacs.rs"] mod dimacs;
-#[path="../parser.rs"] mod parser;
-
 use byteorder::{WriteBytesExt, LittleEndian};
 use std::mem;
 use std::fmt;
@@ -8,10 +5,9 @@ use std::rc::Rc;
 use std::convert::{TryInto};
 use std::cell::RefCell;
 use std::fs::{File, read_to_string};
-use std::env;
 use std::io::{self, *};
-use dimacs::Clause;
-use parser::*;
+use super::dimacs::{self, Clause};
+use super::parser::*;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum StepKind { Add, Del }
@@ -334,8 +330,7 @@ pub fn process_proof<I: Iterator<Item=u8>>(vars: usize, fmla: &Vec<Clause>, drat
   }
 }
 
-fn main() -> io::Result<()> {
-  let mut args = env::args().skip(1);
+pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
 	let arg1 = args.next().expect("missing input file");
   let proof = File::open(args.next().expect("missing proof file"))?;
 	let (vars, fmla) = dimacs::parse_dimacs(read_to_string(arg1)?.chars());

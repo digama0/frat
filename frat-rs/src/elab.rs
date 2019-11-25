@@ -1,20 +1,14 @@
-#[path="../dimacs.rs"] mod dimacs;
-#[path="../parser.rs"] mod parser;
-#[path="../serialize.rs"] mod serialize;
-#[path="../backparser.rs"] pub mod backparser;
-
 // use std::process::exit;
 use std::io::{self, Write, BufWriter};
 use std::fs::{File, read_to_string};
-use std::env;
 use std::mem;
 use std::hash::{Hash, Hasher};
 use std::num::Wrapping;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
-use dimacs::parse_dimacs;
-use backparser::*;
-use serialize::Serialize;
 use hashbrown::hash_map::{HashMap, Entry};
+use super::dimacs::parse_dimacs;
+use super::serialize::Serialize;
+use super::backparser::*;
 
 struct VAssign {
   values: Vec<Option<bool>>
@@ -483,8 +477,7 @@ fn is_perm(v: &Vec<i64>, w: &Vec<i64>) -> bool {
   v.len() == w.len() && v.iter().all(|i| w.contains(i))
 }
 
-fn main() -> io::Result<()> {
-  let mut args = env::args().skip(1);
+pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
   let dimacs = args.next().expect("missing input file");
   let frat_path = args.next().expect("missing proof file");
 

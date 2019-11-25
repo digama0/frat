@@ -128,3 +128,10 @@ pub fn check_proof<M: Mode>(proof: File) -> io::Result<()> {
   if bad { exit(1) }
   Ok(())
 }
+
+pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
+  let mut proof = File::open(args.next().expect("missing proof file"))?;
+  let bin = detect_binary(&mut proof)?;
+  if bin { check_proof::<Bin>(proof) }
+  else { check_proof::<Ascii>(proof) }
+}
