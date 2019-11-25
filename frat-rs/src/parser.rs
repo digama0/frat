@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 pub trait Mode: Default {
   const OFFSET: usize;
+  const BIN: bool;
   fn back_scan(c: u8) -> bool;
   fn keyword<I: Iterator<Item=u8>>(it: &mut I) -> Option<u8> { it.next() }
   fn unum<I: Iterator<Item=u8>>(it: &mut I) -> Option<u64>;
@@ -44,6 +45,7 @@ pub trait Mode: Default {
 
 impl Mode for Bin {
   const OFFSET: usize = 1;
+  const BIN: bool = true;
   fn back_scan(c: u8) -> bool { c == 0 }
 
   fn unum<I: Iterator<Item=u8>>(it: &mut I) -> Option<u64> {
@@ -92,6 +94,7 @@ impl Ascii {
 }
 impl Mode for Ascii {
   const OFFSET: usize = 0;
+  const BIN: bool = false;
   fn back_scan(c: u8) -> bool { c > ('9' as u8) }
   fn keyword<I: Iterator<Item=u8>>(it: &mut I) -> Option<u8> { Ascii::spaces(it) }
   fn unum<I: Iterator<Item=u8>>(it: &mut I) -> Option<u64> {
@@ -143,6 +146,7 @@ impl<M, I> DRATParser<M, I> {
 	pub fn from(_: M, it: I) -> Self { DRATParser(it, PhantomData) }
 }
 
+#[derive(Debug)]
 pub enum DRATStep {
 	Add(Vec<i64>),
 	Del(Vec<i64>)
@@ -151,10 +155,19 @@ pub enum DRATStep {
 impl<M: Mode, I: Iterator<Item=u8>> Iterator for DRATParser<M, I> {
 	type Item = DRATStep;
 	fn next(&mut self) -> Option<DRATStep> {
+    const A: u8 = 'a' as u8;
     const D: u8 = 'd' as u8;
-    match M::keyword(&mut self.0)? {
-      D => Some(DRATStep::Del(M::ivec(&mut self.0))),
-      k => Some(DRATStep::Add(M::ivec(&mut Some(k).iter().cloned().chain(&mut self.0))))
+    if M::BIN {
+      match M::keyword(&mut self.0)? {
+        D => Some(DRATStep::Del(M::ivec(&mut self.0))),
+        A => Some(DRATStep::Add(M::ivec(&mut self.0))),
+        k => panic!("bad keyword {}", k as char)
+      }
+    } else {
+      match M::keyword(&mut self.0)? {
+        D => Some(DRATStep::Del(M::ivec(&mut self.0))),
+        k => Some(DRATStep::Add(M::ivec(&mut Some(k).iter().cloned().chain(&mut self.0))))
+      }
     }
 	}
 }

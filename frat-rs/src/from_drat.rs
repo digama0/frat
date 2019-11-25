@@ -30,7 +30,8 @@ fn from_drat<M: Mode>(mode: M, cnf: Vec<Vec<i64>>, drat: File, frat: File) -> io
 
       DRATStep::Del(ls) => {
         let ls = PermClause(ls);
-        let vec = ctx.get_mut(&ls).expect("deleted nonexistent clause");
+        let vec = ctx.get_mut(&ls).unwrap_or_else(
+          || panic!("deleted nonexistent clause {:?}", ls.0));
         let st = vec.pop().expect("deleted nonexistent clause");
         if vec.is_empty() { ctx.remove(&ls); }
         StepRef::Del(st, &ls.0).write(w)?;
