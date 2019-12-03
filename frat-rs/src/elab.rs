@@ -7,8 +7,9 @@ use std::ops::{Deref, DerefMut, Index, IndexMut};
 use hashbrown::hash_map::{HashMap, Entry};
 use super::dimacs::parse_dimacs;
 use super::serialize::Serialize;
-use super::parser::{detect_binary, Mode, Ascii, Bin, LRATParser, LRATStep};
-use super::backparser::{StepParser, Step, ElabStepParser, ElabStep, Proof};
+use super::parser::{detect_binary, Step, StepRef, ElabStep,
+  Proof, ProofRef, Mode, Ascii, Bin, LRATParser, LRATStep};
+use super::backparser::{StepParser, ElabStepParser};
 use super::perm_clause::*;
 
 struct VAssign {
@@ -543,4 +544,49 @@ pub fn lratchk(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   let dimacs = args.next().expect("missing input file");
   let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
   check_lrat(Ascii, cnf, &args.next().expect("missing proof file"))
+}
+
+fn refrat_pass(elab: File, w: &mut impl Write) -> io::Result<()> {
+
+  let mut ctx: HashMap<u64, Vec<i64>> = HashMap::new();
+  for s in ElabStepParser::new(Bin, elab)? {
+    // eprintln!("-> {:?}", s);
+
+    match s {
+
+      ElabStep::Orig(i, ls) => {
+        StepRef::Orig(i, &ls).write(w)?;
+        ctx.insert(i, ls);
+      }
+
+      ElabStep::Add(i, ls, is) => {
+        StepRef::Add(i, &ls, Some(ProofRef::LRAT(&is))).write(w)?;
+        ctx.insert(i, ls);
+      }
+
+      ElabStep::Reloc(relocs) => {
+        StepRef::Reloc(&relocs).write(w)?;
+        let removed: Vec<_> = relocs.iter()
+          .map(|(from, to)| (*to, ctx.remove(from))).collect();
+        for (to, o) in removed {
+          if let Some(s) = o { ctx.insert(to, s); }
+        }
+      }
+
+      ElabStep::Del(i) => {
+        Step::Del(i, ctx.remove(&i).unwrap()).write(w)?;
+      }
+    }
+  }
+
+  for (i, s) in ctx { Step::Final(i, s).write(w)? }
+
+  Ok(())
+}
+
+pub fn refrat(mut args: impl Iterator<Item=String>) -> io::Result<()> {
+  let elab_path = args.next().expect("missing elab file");
+  let frat_path = args.next().expect("missing frat file");
+  let w = &mut BufWriter::new(File::create(&frat_path)?);
+  refrat_pass(File::open(elab_path)?, w)
 }

@@ -18,7 +18,8 @@ fn main() -> io::Result<()> {
     "fratchk" => fratchk::main(args),
     "dratchk" => dratchk::main(args),
     "lratchk" => elab::lratchk(args),
+    "refrat" => elab::refrat(args),
     "from-drat" => from_drat::main(args),
-    _ => panic!("incorrect subcommand, expected {elab, fratchk, dratchk, lratchk}")
+    _ => panic!("incorrect subcommand, expected {elab, fratchk, dratchk, lratchk, refrat, from-drat}")
   }
 }
