@@ -290,7 +290,7 @@ impl<F: Write> Serializer<F> {
   }
 }
 
-pub fn process_proof<I: Iterator<Item=u8>>(vars: usize, fmla: &Vec<Clause>, drat: ProofIter<I>, frat: bool) {
+pub fn process_proof(vars: usize, fmla: &Vec<Clause>, drat: ProofIter<impl Iterator<Item=u8>>, frat: bool) {
   let mut pass1 = Pass1::new();
   for cl in fmla { pass1.add(cl.clone(), true) }
   for (k, cl) in drat {
@@ -330,7 +330,7 @@ pub fn process_proof<I: Iterator<Item=u8>>(vars: usize, fmla: &Vec<Clause>, drat
   }
 }
 
-pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
+pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
 	let arg1 = args.next().expect("missing input file");
   let proof = File::open(args.next().expect("missing proof file"))?;
 	let (vars, fmla) = dimacs::parse_dimacs(read_to_string(arg1)?.chars());

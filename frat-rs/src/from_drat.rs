@@ -6,7 +6,7 @@ use super::parser::{detect_binary, Mode, Bin, Ascii, DRATParser, DRATStep, StepR
 use super::serialize::Serialize;
 use super::perm_clause::*;
 
-fn from_drat<M: Mode>(mode: M, cnf: Vec<Vec<i64>>, drat: File, frat: File) -> io::Result<()> {
+fn from_drat(mode: impl Mode, cnf: Vec<Vec<i64>>, drat: File, frat: File) -> io::Result<()> {
   let drat = DRATParser::from(mode, BufReader::new(drat).bytes().map(Result::unwrap));
   let w = &mut BufWriter::new(frat);
   let mut k = 0; // Counter for the last used ID
@@ -48,7 +48,7 @@ fn from_drat<M: Mode>(mode: M, cnf: Vec<Vec<i64>>, drat: File, frat: File) -> io
   w.flush()
 }
 
-pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
+pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   let (_vars, cnf) = parse_dimacs(read_to_string(args.next().expect("missing input file"))?.chars());
   let mut drat = File::open(args.next().expect("missing proof file"))?;
   let bin = detect_binary(&mut drat)?;

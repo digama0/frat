@@ -105,7 +105,7 @@ impl<I: Iterator<Item=char>> Iterator for Lexer<I> {
 }
 
 pub type Clause = Vec<i64>;
-pub fn parse_dimacs<I: Iterator<Item=char>>(input: I) -> (usize, Vec<Clause>) {
+pub fn parse_dimacs(input: impl Iterator<Item=char>) -> (usize, Vec<Clause>) {
   let mut lex = Lexer::from(input);
   match (lex.next(), lex.next(), lex.next(), lex.next()) {
     (Some(Ident(Problem)), Some(Ident(Cnf)), Some(Nat(vars)), Some(Nat(clauses))) => {

@@ -243,7 +243,7 @@ impl Hint {
   }
 }
 
-// Return the next literal to be propagated, and indicate whether 
+// Return the next literal to be propagated, and indicate whether
 // its propagation should be limited to marked/unmarked clauses
 fn next_prop_lit(ls0: &mut VecDeque<i64>, ls1: &mut VecDeque<i64>) -> Option<(bool, i64)> {
   if let Some(l) = ls0.pop_front() { return Some((true, l)); }
@@ -404,7 +404,7 @@ fn find_new_watch(c: &Clause, va: &VAssign) -> Option<usize> {
   c.iter().skip(2).position(|x| va.val(*x).is_none()).map(|u| u+2)
 }
 
-fn trim<W: Write>(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut W) -> io::Result<()> {
+fn trim(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut impl Write) -> io::Result<()> {
 
   let mut k = 0 as u64; // Counter for the last used ID
   let cnf: HashMap<PermClauseRef, u64> = // original CNF
@@ -467,7 +467,7 @@ fn trim<W: Write>(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut W) -> io::Result<(
   panic!("did not find empty clause");
 }
 
-pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
+pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   let dimacs = args.next().expect("missing input file");
   let frat_path = args.next().expect("missing proof file");
 
@@ -501,7 +501,7 @@ pub fn main<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
   Ok(())
 }
 
-fn check_lrat<M: Mode>(mode: M, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Result<()> {
+fn check_lrat(mode: impl Mode, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Result<()> {
   let lrat = File::open(lrat_file)?;
   let lp = LRATParser::from(mode, BufReader::new(lrat).bytes().map(Result::unwrap));
   let mut ctx: Context = Context::new();
@@ -539,9 +539,8 @@ fn check_lrat<M: Mode>(mode: M, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Resu
   panic!("did not find empty clause")
 }
 
-pub fn lratchk<I: Iterator<Item=String>>(mut args: I) -> io::Result<()> {
+pub fn lratchk(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   let dimacs = args.next().expect("missing input file");
   let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
   check_lrat(Ascii, cnf, &args.next().expect("missing proof file"))
 }
-

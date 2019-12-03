@@ -3,30 +3,30 @@ use std::io::{self, Write};
 use super::parser::{Step, StepRef, ElabStep, ProofRef};
 
 pub trait Serialize {
-  fn write<W: Write>(&self, w: &mut W) -> io::Result<()>;
+  fn write(&self, w: &mut impl Write) -> io::Result<()>;
 }
 
 impl<A: Serialize, B: Serialize> Serialize for (A, B) {
-  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> { self.0.write(w)?; self.1.write(w) }
+  fn write(&self, w: &mut impl Write) -> io::Result<()> { self.0.write(w)?; self.1.write(w) }
 }
 
 impl Serialize for u8 {
-  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> { w.write_all(&[*self]) }
+  fn write(&self, w: &mut impl Write) -> io::Result<()> { w.write_all(&[*self]) }
 }
 
 impl Serialize for char {
-  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> { (*self as u8).write(w) }
+  fn write(&self, w: &mut impl Write) -> io::Result<()> { (*self as u8).write(w) }
 }
 
 impl<'a, A: Serialize> Serialize for &'a Vec<A> {
-  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+  fn write(&self, w: &mut impl Write) -> io::Result<()> {
     for v in *self { v.write(w)? }
     0u8.write(w)
   }
 }
 
 impl Serialize for u64 {
-  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+  fn write(&self, w: &mut impl Write) -> io::Result<()> {
     let mut val = *self;
     let mut buf = ArrayVec::<[u8; 10]>::new();
     loop {
@@ -42,14 +42,14 @@ impl Serialize for u64 {
 }
 
 impl Serialize for i64 {
-  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+  fn write(&self, w: &mut impl Write) -> io::Result<()> {
       let u: u64 = if *self < 0 { -*self as u64 * 2 + 1 } else { *self as u64 * 2 };
       u.write(w)
   }
 }
 
 impl<'a> Serialize for StepRef<'a> {
-  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+  fn write(&self, w: &mut impl Write) -> io::Result<()> {
     match *self {
       StepRef::Orig(idx, vec) => ('o', (idx, vec)).write(w),
       StepRef::Add(idx, vec, None) => ('a', (idx, vec)).write(w),
@@ -66,13 +66,13 @@ impl<'a> Serialize for StepRef<'a> {
 }
 
 impl Serialize for Step {
-  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+  fn write(&self, w: &mut impl Write) -> io::Result<()> {
     self.as_ref().write(w)
   }
 }
 
 impl Serialize for ElabStep {
-  fn write<W: Write>(&self, w: &mut W) -> io::Result<()> {
+  fn write(&self, w: &mut impl Write) -> io::Result<()> {
     match *self {
       ElabStep::Orig(idx, ref vec) => ('o', (idx, vec)).write(w),
       ElabStep::Add(idx, ref vec, ref steps) =>

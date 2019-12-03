@@ -6,11 +6,11 @@ pub trait Mode: Default {
   const OFFSET: usize;
   const BIN: bool;
   fn back_scan(c: u8) -> bool;
-  fn keyword<I: Iterator<Item=u8>>(it: &mut I) -> Option<u8> { it.next() }
-  fn unum<I: Iterator<Item=u8>>(it: &mut I) -> Option<u64>;
-  fn num<I: Iterator<Item=u8>>(it: &mut I) -> Option<i64>;
+  fn keyword(it: &mut impl Iterator<Item=u8>) -> Option<u8> { it.next() }
+  fn unum(it: &mut impl Iterator<Item=u8>) -> Option<u64>;
+  fn num(it: &mut impl Iterator<Item=u8>) -> Option<i64>;
 
-  fn uvec<I: Iterator<Item=u8>>(it: &mut I) -> Vec<u64> {
+  fn uvec(it: &mut impl Iterator<Item=u8>) -> Vec<u64> {
     let mut vec = Vec::new();
     loop { match Self::unum(it).expect("bad step") {
       0 => return vec,
@@ -18,7 +18,7 @@ pub trait Mode: Default {
     } }
   }
 
-  fn ivec<I: Iterator<Item=u8>>(it: &mut I) -> Vec<i64> {
+  fn ivec(it: &mut impl Iterator<Item=u8>) -> Vec<i64> {
     let mut vec = Vec::new();
     loop { match Self::num(it).expect("bad step") {
       0 => return vec,
@@ -26,7 +26,7 @@ pub trait Mode: Default {
     } }
   }
 
-  fn uvec2<I: Iterator<Item=u8>>(it: &mut I) -> Vec<(u64, u64)> {
+  fn uvec2(it: &mut impl Iterator<Item=u8>) -> Vec<(u64, u64)> {
     let mut vec = Vec::new();
     loop {
       match Self::unum(it).expect("bad step") {
@@ -48,7 +48,7 @@ impl Mode for Bin {
   const BIN: bool = true;
   fn back_scan(c: u8) -> bool { c == 0 }
 
-  fn unum<I: Iterator<Item=u8>>(it: &mut I) -> Option<u64> {
+  fn unum(it: &mut impl Iterator<Item=u8>) -> Option<u64> {
     let mut res: u64 = 0;
     let mut mul: u8 = 0;
     for c in it {
@@ -62,27 +62,27 @@ impl Mode for Bin {
     None
   }
 
-  fn num<I: Iterator<Item=u8>>(it: &mut I) -> Option<i64> {
+  fn num(it: &mut impl Iterator<Item=u8>) -> Option<i64> {
     Bin::unum(it).map(|ulit|
       if ulit & 1 != 0 { -((ulit >> 1) as i64) }
       else { (ulit >> 1) as i64 })
   }
 }
 impl Ascii {
-  fn spaces<I: Iterator<Item=u8>>(it: &mut I) -> Option<u8> {
+  fn spaces(it: &mut impl Iterator<Item=u8>) -> Option<u8> {
     loop { match it.next() {
       Some(c) if c == (' ' as u8) || c == ('\n' as u8) || c == ('\r' as u8) => {},
       o => return o
     } }
   }
-  fn initial_neg<I: Iterator<Item=u8>>(it: &mut I) -> (bool, Option<u8>) {
+  fn initial_neg(it: &mut impl Iterator<Item=u8>) -> (bool, Option<u8>) {
     match Ascii::spaces(it) {
       Some(c) if c == ('-' as u8) => (true, it.next()),
       o => (false, o)
     }
   }
 
-  fn parse_num<I: Iterator<Item=u8>>(peek: Option<u8>, it: &mut I) -> Option<u64> {
+  fn parse_num(peek: Option<u8>, it: &mut impl Iterator<Item=u8>) -> Option<u64> {
     let mut val = (peek? as char).to_digit(10).unwrap() as u64;
 		while let Some(parsed) = it.next().and_then(|c| (c as char).to_digit(10)) {
 			val *= 10;
@@ -96,11 +96,11 @@ impl Mode for Ascii {
   const OFFSET: usize = 0;
   const BIN: bool = false;
   fn back_scan(c: u8) -> bool { c > ('9' as u8) }
-  fn keyword<I: Iterator<Item=u8>>(it: &mut I) -> Option<u8> { Ascii::spaces(it) }
-  fn unum<I: Iterator<Item=u8>>(it: &mut I) -> Option<u64> {
+  fn keyword(it: &mut impl Iterator<Item=u8>) -> Option<u8> { Ascii::spaces(it) }
+  fn unum(it: &mut impl Iterator<Item=u8>) -> Option<u64> {
     Ascii::parse_num(Ascii::spaces(it), it)
   }
-  fn num<I: Iterator<Item=u8>>(it: &mut I) -> Option<i64> {
+  fn num(it: &mut impl Iterator<Item=u8>) -> Option<i64> {
     let (neg, peek) = Ascii::initial_neg(it);
     let val = Ascii::parse_num(peek, it)?;
     Some(if neg { -(val as i64) } else { val as i64 })
