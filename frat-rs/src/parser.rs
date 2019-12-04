@@ -128,10 +128,9 @@ pub enum LRATStep {
 impl<M: Mode, I: Iterator<Item=u8>> Iterator for LRATParser<M, I> {
 	type Item = (u64, LRATStep);
 	fn next(&mut self) -> Option<(u64, LRATStep)> {
-    const D: u8 = 'd' as u8;
 		Some((M::unum(&mut self.0)?,
       match M::keyword(&mut self.0)? {
-        D => LRATStep::Del(M::ivec(&mut self.0)),
+        b'd' => LRATStep::Del(M::ivec(&mut self.0)),
         k => LRATStep::Add(
           M::ivec(&mut Some(k).iter().cloned().chain(&mut self.0)),
           M::ivec(&mut self.0))
@@ -155,12 +154,10 @@ pub enum DRATStep {
 impl<M: Mode, I: Iterator<Item=u8>> Iterator for DRATParser<M, I> {
 	type Item = DRATStep;
 	fn next(&mut self) -> Option<DRATStep> {
-    const A: u8 = 'a' as u8;
-    const D: u8 = 'd' as u8;
     if M::BIN {
       match M::keyword(&mut self.0)? {
-        D => Some(DRATStep::Del(M::ivec(&mut self.0))),
-        A => Some(DRATStep::Add(M::ivec(&mut self.0))),
+        b'd' => Some(DRATStep::Del(M::ivec(&mut self.0))),
+        b'a' => Some(DRATStep::Add(M::ivec(&mut self.0))),
         k => panic!("bad keyword {}", k as char)
       }
     } else {

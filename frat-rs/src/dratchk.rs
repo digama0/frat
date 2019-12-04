@@ -18,12 +18,10 @@ impl<I: Iterator<Item=u8>> Iterator for ProofIter<I> {
 	type Item = (StepKind, Clause);
 
 	fn next(&mut self) -> Option<Self::Item> {
-    const A: u8 = 'a' as u8;
-    const D: u8 = 'd' as u8;
     let k = match self.0.next() {
       None => return None,
-      Some(A) => StepKind::Add,
-      Some(D) => StepKind::Del,
+      Some(b'a') => StepKind::Add,
+      Some(b'd') => StepKind::Del,
       k => panic!("incorrect step {:?}, is this not a binary file?", k) };
     let mut vec = Vec::new();
     loop {

@@ -58,21 +58,14 @@ impl<M> BackParser<M> {
 
 impl<M: Mode> BackParser<M> {
   fn parse_segment<I: Iterator<Item=u8>>(mut it: I) -> Segment {
-    const A: u8 = 'a' as u8;
-    const D: u8 = 'd' as u8;
-    const F: u8 = 'f' as u8;
-    const O: u8 = 'o' as u8;
-    const L: u8 = 'l' as u8;
-    const R: u8 = 'r' as u8;
-    const T: u8 = 't' as u8;
     match M::keyword(&mut it) {
-      Some(A) => Segment::Add(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
-      Some(D) => Segment::Del(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
-      Some(F) => Segment::Final(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
-      Some(L) => Segment::LProof(M::uvec(&mut it)),
-      Some(O) => Segment::Orig(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
-      Some(R) => Segment::Reloc(M::uvec2(&mut it)),
-      Some(T) => Segment::Todo(M::unum(&mut it).unwrap()),
+      Some(b'a') => Segment::Add(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
+      Some(b'd') => Segment::Del(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
+      Some(b'f') => Segment::Final(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
+      Some(b'l') => Segment::LProof(M::uvec(&mut it)),
+      Some(b'o') => Segment::Orig(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
+      Some(b'r') => Segment::Reloc(M::uvec2(&mut it)),
+      Some(b't') => Segment::Todo(M::unum(&mut it).unwrap()),
       Some(k) => panic!("bad step {:?}", k as char),
       None => panic!("bad step None"),
     }
