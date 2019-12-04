@@ -490,25 +490,27 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   println!("elaborating...");
   if bin { elab(Bin, full, frat, temp_write)? }
   else { elab(Ascii, full, frat, temp_write)? };
-  println!("parsing DIMACS...");
-
-  let temp_read = File::open(temp_path)?;
-  let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
-  println!("trimming...");
-  if let Some(lrat_file) = args.next() {
-    let mut lrat = BufWriter::new(File::create(&lrat_file)?);
-    trim(&cnf, temp_read, &mut lrat)?;
-    lrat.flush()?;
-    match args.next() {
-      Some(ref s) if s == "-v" => {
-        println!("verifying...");
-        check_lrat(Ascii, cnf, &lrat_file)?;
-        println!("VERIFIED");
+ 
+  if !full {
+    println!("parsing DIMACS...");
+    let temp_read = File::open(temp_path)?;
+    let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
+    println!("trimming...");
+    if let Some(lrat_file) = args.next() {
+      let mut lrat = BufWriter::new(File::create(&lrat_file)?);
+      trim(&cnf, temp_read, &mut lrat)?;
+      lrat.flush()?;
+      match args.next() {
+        Some(ref s) if s == "-v" => {
+          println!("verifying...");
+          check_lrat(Ascii, cnf, &lrat_file)?;
+          println!("VERIFIED");
+        }
+        _ => ()
       }
-      _ => ()
+    } else {
+      trim(&cnf, temp_read, &mut io::sink())?;
     }
-  } else {
-    trim(&cnf, temp_read, &mut io::sink())?;
   }
   Ok(())
 }
