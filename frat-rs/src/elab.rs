@@ -343,7 +343,7 @@ fn propagate_hint(ls: &Vec<i64>, ctx: &Context, mut is: Vec<u64>, strict: bool) 
   }
 }
 
-fn elab<M: Mode>(mode: M, frat: File, temp: File) -> io::Result<()> {
+fn elab<M: Mode>(mode: M, full: bool, frat: File, temp: File) -> io::Result<()> {
   let w = &mut BufWriter::new(temp);
   let mut ctx: Context = Context::new();
 
@@ -353,7 +353,7 @@ fn elab<M: Mode>(mode: M, frat: File, temp: File) -> io::Result<()> {
 
       Step::Orig(i, ls) => {
         ctx.step = Some(i);
-        if ctx.marked(i) {  // If the original clause is marked
+        if full || ctx.marked(i) {  // If the original clause is marked
           ElabStep::Orig(i, ls).write(w).expect("Failed to write orig step");
         }
         ctx.remove(i);
@@ -362,7 +362,7 @@ fn elab<M: Mode>(mode: M, frat: File, temp: File) -> io::Result<()> {
       Step::Add(i, ls, p) => {
         ctx.step = Some(i);
         let c = ctx.remove(i);
-        if c.marked {
+        if full || c.marked {
           let mut ht: Hint = match p {
             Some(Proof::LRAT(is)) => propagate_hint(&ls, &ctx, is, false),
             _ => None
@@ -372,7 +372,9 @@ fn elab<M: Mode>(mode: M, frat: File, temp: File) -> io::Result<()> {
             // let v = cs.get_mut(&i).unwrap();
             if !ctx.marked(i) { // If the necessary clause is not active yet
               ctx.mark(i); // Make it active
-              ElabStep::Del(i).write(w).expect("Failed to write delete step");
+              if !full {
+                ElabStep::Del(i).write(w).expect("Failed to write delete step");
+              }
             }
           }
           ElabStep::Add(i, ls, ht.steps).write(w).expect("Failed to write add step");
@@ -387,7 +389,12 @@ fn elab<M: Mode>(mode: M, frat: File, temp: File) -> io::Result<()> {
         }
       }
 
-      Step::Del(i, ls) => ctx.insert(i, false, ls),
+      Step::Del(i, ls) => {
+        ctx.insert(i, false, ls);
+        if full {
+          ElabStep::Del(i).write(w).expect("Failed to write delete step");
+        }
+      },
 
       Step::Final(i, ls) => {
         // Identical to the Del case, except that the clause should be marked if empty
@@ -468,7 +475,11 @@ fn trim(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut impl Write) -> io::Result<()
   panic!("did not find empty clause");
 }
 
-pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
+pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
+  let mut args = args.peekable();
+  let full = if args.peek().map_or(false, |s| s == "--full") {
+    args.next(); true
+  } else {false};
   let dimacs = args.next().expect("missing input file");
   let frat_path = args.next().expect("missing proof file");
 
@@ -477,8 +488,8 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   let bin = detect_binary(&mut frat)?;
   let temp_write = File::create(&temp_path)?;
   println!("elaborating...");
-  if bin { elab(Bin, frat, temp_write)? }
-  else { elab(Ascii, frat, temp_write)? };
+  if bin { elab(Bin, full, frat, temp_write)? }
+  else { elab(Ascii, full, frat, temp_write)? };
   println!("parsing DIMACS...");
 
   let temp_read = File::open(temp_path)?;

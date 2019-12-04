@@ -162,7 +162,7 @@ impl<M: Mode, I: Iterator<Item=u8>> Iterator for DRATParser<M, I> {
       }
     } else {
       match M::keyword(&mut self.0)? {
-        D => Some(DRATStep::Del(M::ivec(&mut self.0))),
+        b'd' => Some(DRATStep::Del(M::ivec(&mut self.0))),
         k => Some(DRATStep::Add(M::ivec(&mut Some(k).iter().cloned().chain(&mut self.0))))
       }
     }
