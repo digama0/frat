@@ -252,7 +252,7 @@ fn next_prop_lit(ls0: &mut VecDeque<i64>, ls1: &mut VecDeque<i64>) -> Option<(bo
   None
 }
 
-fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
+fn propagate(c: &[i64], ctx: &mut Context) -> Option<Hint> {
 
   let mut ls0: VecDeque<i64> = VecDeque::new();
   let mut ls1: VecDeque<i64> = VecDeque::new();
@@ -263,14 +263,14 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
     ls0.push_back(-l);
     ls1.push_back(-l);
     ht.add(-l, None);
-    if !va.set(-l) { return ht }
+    if !va.set(-l) { return Some(ht) }
   }
 
   for (&i, &l) in &ctx.units {
     ls0.push_back(l);
     ls1.push_back(l);
     ht.add(l, Some(i));
-    if !va.set(l) { return ht }
+    if !va.set(l) { return Some(ht) }
   }
 
   // Main unit propagation loop
@@ -284,7 +284,7 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
           ls0.push_back(k);
           ls1.push_back(k);
           ht.add(k, Some(j));
-          if !va.set(k) { return ht }
+          if !va.set(k) { return Some(ht) }
         }
       }
     }
@@ -292,7 +292,8 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
 
   // If there are no more literals to propagate, unit propagation has failed
   // let _ = propagate_stuck(ctx, &ht, &ls, c);
-  panic!("Unit propagation stuck, cannot add clause {:?}", c)
+  // panic!("Unit propagation stuck, cannot add clause {:?}", c)
+  None
 }
 
 // fn propagate_stuck(ctx: &Context, ht: &Hint, ls: &VecDeque<i64>, c: &Vec<i64>) -> io::Result<()> {
@@ -308,16 +309,16 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
 //   writeln!(log, "\nFailed to add clause: {:?}", c)
 // }
 
-fn propagate_hint(ls: &Vec<i64>, ctx: &Context, mut is: Vec<i64>, strict: bool) -> Option<Hint> {
+fn propagate_hint(ls: &[i64], ctx: &Context, is: &[i64], strict: bool) -> (Hint, bool) {
   let mut ht: Hint = Hint { reasons: ls.iter().map(|&x| (-x, None)).collect(), steps: vec![] };
 
+  let mut is: Vec<u64> = is.iter().map(|&i| i as u64).collect();
   let mut queue = vec![];
   loop {
     let len = is.len();
     'a: for c in is.drain(..) {
-      let uc = c.try_into().unwrap();
       let mut uf: Option<i64> = None;
-      let cl = ctx.get(uc);
+      let cl = ctx.get(c);
       for l in cl {
         if !ht.reasons.contains_key(&-l) {
           if uf.replace(l).is_some() {
@@ -329,19 +330,81 @@ fn propagate_hint(ls: &Vec<i64>, ctx: &Context, mut is: Vec<i64>, strict: bool) 
       }
       match uf {
         None => {
-          ht.steps.push(uc);
-          return Some(ht)
+          ht.steps.push(c);
+          return (ht, true)
         },
         Some(l) => if let Entry::Vacant(v) = ht.reasons.entry(l) {
           v.insert(Some(ht.steps.len()));
-          ht.steps.push(uc);
+          ht.steps.push(c);
         }
       }
     }
-    assert!(queue.len() < len,
-      "at {:?}: unit propagation failed to find conflict", ctx.step);
+    if queue.len() >= len {return (ht, false)}
     mem::swap(&mut is, &mut queue);
   }
+}
+
+fn build_step(ls: &[i64], ctx: &mut Context, hint: Option<&[i64]>, strict: bool) -> Option<Vec<i64>> {
+  let mut ht = hint.and_then(|is| {
+    let (ht, success) = propagate_hint(&ls, &ctx, is, strict);
+    if success {Some(Some(ht))} else {None}
+  }).unwrap_or_else(|| propagate(ls, ctx))?;
+  ht.minimize(&ctx);
+  Some(ht.steps.iter().map(|&i| i as i64).collect())
+}
+
+fn run_rat_step<'a>(ls: &[i64], ctx: &mut Context, init: &[i64],
+    mut rats: Option<(&'a i64, &'a [i64])>, strict: bool) -> Vec<i64> {
+  if rats.is_none() {
+    if let Some(res) = build_step(ls, ctx, None, strict) {return res}
+  }
+  let Hint {mut reasons, ..} = propagate_hint(&ls, &ctx, init, strict).0;
+  let pivot = ls[0];
+  reasons.remove(&-pivot);
+  let ls2: Vec<i64> = reasons.into_iter().map(|(i, _)| -i).collect();
+  let mut proofs = HashMap::new();
+  let mut order = vec![];
+  while let Some((&s, rest)) = rats {
+    let step = -s as u64;
+    order.push(step);
+    match rest.iter().position(|&i| i < 0) {
+      None => {
+        proofs.insert(step, rest);
+        break
+      }
+      Some(i) => {
+        let (chain, r) = rest.split_at(i);
+        proofs.insert(step, chain);
+        rats = r.split_first();
+      }
+    }
+  }
+  let mut steps = vec![];
+  let mut todo = vec![];
+  for (&c, cl) in &ctx.clauses {
+    if cl.lits.contains(&-pivot) {
+      let mut resolvent = ls2.clone();
+      resolvent.extend(cl.lits.iter().cloned().filter(|&i| i != -pivot));
+      match proofs.get(&c) {
+        Some(&chain) => todo.push((c, resolvent, Some(chain))),
+        None if strict => panic!("Clause {:?} not in LRAT trace", cl.lits),
+        None => {
+          order.push(c);
+          todo.push((c, resolvent, None));
+        }
+      }
+    }
+  }
+  let mut proofs: HashMap<_, _> = todo.into_iter().map(|(c, resolvent, hint)|
+    (c, build_step(&resolvent, ctx, hint, strict).unwrap_or_else(||
+      panic!("Unit propagation stuck, cannot resolve clause {:?}", resolvent)))).collect();
+
+  for c in order {
+    let mut chain = proofs.remove(&c).unwrap();
+    steps.push(-(c as i64));
+    steps.append(&mut chain);
+  }
+  steps
 }
 
 fn elab<M: Mode>(mode: M, full: bool, frat: File, temp: File) -> io::Result<()> {
@@ -364,12 +427,18 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, temp: File) -> io::Result<()> 
         ctx.step = Some(i);
         let c = ctx.remove(i);
         if full || c.marked {
-          let mut ht: Hint = match p {
-            Some(Proof::LRAT(is)) => propagate_hint(&ls, &ctx, is, false),
-            _ => None
-          }.unwrap_or_else(|| propagate(&ls, &mut ctx));
-          ht.minimize(&ctx);
-          for &i in &ht.steps {
+          let steps: Vec<i64> = if let Some(Proof::LRAT(is)) = p {
+            if let Some(start) = is.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
+              let (init, rest) = is.split_at(start);
+              run_rat_step(&ls, &mut ctx, init, rest.split_first(), false)
+            } else {
+              run_rat_step(&ls, &mut ctx, &is, None, false)
+            }
+          } else {
+            run_rat_step(&ls, &mut ctx, &[], None, false)
+          };
+          for &i in &steps {
+            let i = i.abs() as u64;
             // let v = cs.get_mut(&i).unwrap();
             if !ctx.marked(i) { // If the necessary clause is not active yet
               ctx.mark(i); // Make it active
@@ -378,8 +447,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, temp: File) -> io::Result<()> 
               }
             }
           }
-          ElabStep::Add(i, ls, ht.steps.iter().map(|&i| i as i64).collect())
-            .write(w).expect("Failed to write add step");
+          ElabStep::Add(i, ls, steps).write(w).expect("Failed to write add step");
         }
       }
 
@@ -496,7 +564,7 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   println!("elaborating...");
   if bin { elab(Bin, full, frat, temp_write)? }
   else { elab(Ascii, full, frat, temp_write)? };
- 
+
   if !full {
     println!("parsing DIMACS...");
     let temp_read = File::open(temp_path)?;
@@ -543,8 +611,12 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Resul
         assert!(i > k, "out-of-order LRAT proofs not supported");
         k = i;
         // eprintln!("{}: {:?} {:?}", k, ls, p);
-        let p = p.into_iter().map(|i| i.try_into().unwrap()).collect();
-        propagate_hint(&ls, &ctx, p, true);
+        if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
+          let (init, rest) = p.split_at(start);
+          run_rat_step(&ls, &mut ctx, init, rest.split_first(), false);
+        } else {
+          run_rat_step(&ls, &mut ctx, &p, None, false);
+        }
         if ls.is_empty() { return Ok(()) }
         ctx.insert(i, true, ls);
       }
