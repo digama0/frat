@@ -171,7 +171,7 @@ impl<M: Mode, I: Iterator<Item=u8>> Iterator for DRATParser<M, I> {
 
 #[derive(Debug)]
 pub enum Proof {
-  LRAT(Vec<u64>),
+  LRAT(Vec<i64>),
   Sorry
 }
 
@@ -188,14 +188,14 @@ pub enum Step {
 #[derive(Debug, Clone)]
 pub enum ElabStep {
   Orig(u64, Vec<i64>),
-  Add(u64, Vec<i64>, Vec<u64>),
+  Add(u64, Vec<i64>, Vec<i64>),
   Reloc(Vec<(u64, u64)>),
   Del(u64),
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum ProofRef<'a> {
-  LRAT(&'a Vec<u64>),
+  LRAT(&'a Vec<i64>),
   Sorry
 }
 

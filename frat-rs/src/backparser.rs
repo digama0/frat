@@ -10,7 +10,7 @@ const BUFFER_SIZE: usize = 0x4000;
 enum Segment {
   Orig(u64, Vec<i64>),
   Add(u64, Vec<i64>),
-  LProof(Vec<u64>),
+  LProof(Vec<i64>),
   Reloc(Vec<(u64, u64)>),
   Del(u64, Vec<i64>),
   Final(u64, Vec<i64>),
@@ -62,7 +62,7 @@ impl<M: Mode> BackParser<M> {
       Some(b'a') => Segment::Add(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
       Some(b'd') => Segment::Del(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
       Some(b'f') => Segment::Final(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
-      Some(b'l') => Segment::LProof(M::uvec(&mut it)),
+      Some(b'l') => Segment::LProof(M::ivec(&mut it)),
       Some(b'o') => Segment::Orig(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
       Some(b'r') => Segment::Reloc(M::uvec2(&mut it)),
       Some(b't') => Segment::Todo(M::unum(&mut it).unwrap()),

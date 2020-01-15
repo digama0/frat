@@ -308,15 +308,16 @@ fn propagate(c: &Vec<i64>, ctx: &mut Context) -> Hint {
 //   writeln!(log, "\nFailed to add clause: {:?}", c)
 // }
 
-fn propagate_hint(ls: &Vec<i64>, ctx: &Context, mut is: Vec<u64>, strict: bool) -> Option<Hint> {
+fn propagate_hint(ls: &Vec<i64>, ctx: &Context, mut is: Vec<i64>, strict: bool) -> Option<Hint> {
   let mut ht: Hint = Hint { reasons: ls.iter().map(|&x| (-x, None)).collect(), steps: vec![] };
 
   let mut queue = vec![];
   loop {
     let len = is.len();
     'a: for c in is.drain(..) {
+      let uc = c.try_into().unwrap();
       let mut uf: Option<i64> = None;
-      let cl = ctx.get(c);
+      let cl = ctx.get(uc);
       for l in cl {
         if !ht.reasons.contains_key(&-l) {
           if uf.replace(l).is_some() {
@@ -328,12 +329,12 @@ fn propagate_hint(ls: &Vec<i64>, ctx: &Context, mut is: Vec<u64>, strict: bool) 
       }
       match uf {
         None => {
-          ht.steps.push(c);
+          ht.steps.push(uc);
           return Some(ht)
         },
         Some(l) => if let Entry::Vacant(v) = ht.reasons.entry(l) {
           v.insert(Some(ht.steps.len()));
-          ht.steps.push(c);
+          ht.steps.push(uc);
         }
       }
     }
@@ -377,7 +378,8 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, temp: File) -> io::Result<()> 
               }
             }
           }
-          ElabStep::Add(i, ls, ht.steps).write(w).expect("Failed to write add step");
+          ElabStep::Add(i, ls, ht.steps.iter().map(|&i| i as i64).collect())
+            .write(w).expect("Failed to write add step");
         }
       }
 
@@ -445,8 +447,12 @@ fn trim(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut impl Write) -> io::Result<()
         write!(lrat, "{}", k)?;
         for x in ls { write!(lrat, " {}", x)? }
         write!(lrat, " 0")?;
-        for x in is { write!(lrat, " {}", m.get(&x).unwrap_or_else(||
-          panic!("step {}: proof step {:?} not found", i, x)))? }
+        for x in is {
+          let ux = x.abs() as u64;
+          let s = *m.get(&ux).unwrap_or_else(||
+            panic!("step {}: proof step {:?} not found", i, ux)) as i64;
+          write!(lrat, " {}", if x < 0 {-s} else {s})?
+        }
         write!(lrat, " 0\n")?;
 
         if b {return Ok(())}
