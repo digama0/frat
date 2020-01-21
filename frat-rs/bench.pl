@@ -40,6 +40,10 @@ read_item(Goal, File, Time) :-
   open(File, read, Stream), 
   read_item_core(Goal, Stream, Time).
 
+run(Strings) :- 
+  atomic_list_concat(Strings, CMD),
+  shell(CMD, _).
+
 run_and_time(Strings, TIME) :- 
   atomic_list_concat(Strings, CMD),
   atomic_list_concat(["time -v ", CMD, " 2> temp"], TIME_CMD),
@@ -49,6 +53,7 @@ run_and_time(Strings, TIME) :-
 
 run_and_measure(Strings, TIME, PEAK_MEM, AVG_MEM) :- 
   atomic_list_concat(Strings, CMD),
+  format('Using command ~w\n', CMD),
   atomic_list_concat(["time -v ", CMD, " 2> temp"], TIME_CMD),
   shell(TIME_CMD, _),
   read_item(read_time, "temp", TIME),
@@ -80,7 +85,7 @@ main([CNF_FILE]) :-
   run_and_time(["lrat-check ", CNF_FILE, " test.lrat"], FRAT_LRAT_CHK_C_TIME),
 
   write("\n------- Checking LRAT from FRAT (Rust) -------\n\n"),
-  run_and_time(["cargo run --release lratchk ", CNF_FILE, " test.lrat"], FRAT_LRAT_CHK_RUST_TIME), % test.frat, test.frat.temp, test.lrat
+  run(["cargo run --release lratchk ", CNF_FILE, " test.lrat 2>&1"]), % test.frat, test.frat.temp, test.lrat
   delete_file("test.lrat"), % test.frat
 
   %%% Script for FRAT1 tests %%%
@@ -105,31 +110,32 @@ main([CNF_FILE]) :-
   run_and_time(["lrat-check ", CNF_FILE, " test.lrat"], DRAT_LRAT_CHK_C_TIME),
 
   write("\n------- Checking LRAT from DRAT (Rust) -------\n\n"),
-  run_and_time(["cargo run --release lratchk ", CNF_FILE, " test.lrat"], DRAT_LRAT_CHK_RUST_TIME), 
+  run(["cargo run --release lratchk ", CNF_FILE, " test.lrat 2>&1"]),
   delete_file("test.lrat"), % 
 
+  write("\n------- Bench Statistics -------\n\n"),
   format('DIMACS-to-FRAT time : ~w seconds\n', DIMACS_FRAT_TIME),
   format('FRAT file size : ~w bytes\n', FRAT_SIZE),
   format('Missing hints : ~w%\n', MISSING),
   format('FRAT-to-LRAT time : ~w seconds\n', FRAT_LRAT_TIME),
-  format('FRAT-to-LRAT peak memory usage : ~w seconds\n', FRAT_LRAT_PEAK_MEM),
-  format('FRAT-to-LRAT average memory usage : ~w seconds\n', FRAT_LRAT_AVG_MEM),
+  format('FRAT-to-LRAT peak memory usage : ~w kb\n', FRAT_LRAT_PEAK_MEM),
+  format('FRAT-to-LRAT average memory usage : ~w kb\n', FRAT_LRAT_AVG_MEM),
   
   % format('FRAT0-to-LRAT time : ~w seconds\n', FRAT0_LRAT_TIME),
   % format('FRAT1-to-LRAT time : ~w seconds\n', FRAT1_LRAT_TIME),
   format('TEMP file size : ~w bytes\n', TEMP_SIZE),
   format('LRAT-from-FRAT file size : ~w bytes\n', FRAT_LRAT_SIZE),
   format('LRAT-from-FRAT check time (C) : ~w seconds\n', FRAT_LRAT_CHK_C_TIME),
-  format('LRAT-from-FRAT check time (Rust) : ~w seconds\n', FRAT_LRAT_CHK_RUST_TIME),
+  % format('LRAT-from-FRAT check time (Rust) : ~w seconds\n', FRAT_LRAT_CHK_RUST_TIME),
   format('DIMACS-to-DRAT time : ~w seconds\n', DIMACS_DRAT_TIME),
   format('DRAT file size : ~w bytes\n', DRAT_SIZE),
   format('DRAT-to-LRAT time : ~w seconds\n', DRAT_LRAT_TIME),
-  format('DRAT-to-LRAT peak memory usage : ~w seconds\n', DRAT_LRAT_PEAK_MEM),
-  format('DRAT-to-LRAT average memory usage : ~w seconds\n', DRAT_LRAT_AVG_MEM),
+  format('DRAT-to-LRAT peak memory usage : ~w kb\n', DRAT_LRAT_PEAK_MEM),
+  format('DRAT-to-LRAT average memory usage : ~w kb\n', DRAT_LRAT_AVG_MEM),
 
   format('LRAT-from-DRAT file size : ~w bytes\n', DRAT_LRAT_SIZE),
   format('LRAT-from-DRAT check time (C) : ~w seconds\n', DRAT_LRAT_CHK_C_TIME),
-  format('LRAT-from-DRAT check time (RUST) : ~w seconds\n', DRAT_LRAT_CHK_RUST_TIME),
+  % format('LRAT-from-DRAT check time (RUST) : ~w seconds\n', DRAT_LRAT_CHK_RUST_TIME),
 
   atomic_list_concat(
     [ DIMACS_FRAT_TIME, FRAT_SIZE, MISSING, FRAT_LRAT_TIME, % FRAT0_LRAT_TIME, FRAT1_LRAT_TIME, 
