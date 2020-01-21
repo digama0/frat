@@ -51,14 +51,13 @@ run_and_time(Strings, TIME) :-
   read_item(read_time, "temp", TIME),
   delete_file("temp").
 
-run_and_measure(Strings, TIME, PEAK_MEM, AVG_MEM) :- 
+run_and_measure(Strings, TIME, PEAK_MEM) :- 
   atomic_list_concat(Strings, CMD),
   format('Using command ~w\n', CMD),
   atomic_list_concat(["time -v ", CMD, " 2> temp"], TIME_CMD),
   shell(TIME_CMD, _),
   read_item(read_time, "temp", TIME),
   read_item(read_peak_mem, "temp", PEAK_MEM),
-  read_item(read_avg_mem, "temp", AVG_MEM),
   delete_file("temp").
 
 main([CNF_FILE]) :- 
@@ -75,7 +74,7 @@ main([CNF_FILE]) :-
   delete_file("frat_stats"),
 
   write("\n------- Elaborating FRAT to LRAT -------\n\n"),
-  run_and_measure(["cargo run --release elab ", CNF_FILE, " test.frat test.lrat"], FRAT_LRAT_TIME, FRAT_LRAT_PEAK_MEM, FRAT_LRAT_AVG_MEM), % test.frat, test.frat.temp, test.lrat
+  run_and_measure(["cargo run --release elab ", CNF_FILE, " test.frat test.lrat"], FRAT_LRAT_TIME, FRAT_LRAT_PEAK_MEM), % test.frat, test.frat.temp, test.lrat
   delete_file("test.frat"), % test.frat.temp, test.lrat
   size_file("test.frat.temp", TEMP_SIZE), 
   delete_file("test.frat.temp"), % test.lrat
@@ -102,7 +101,7 @@ main([CNF_FILE]) :-
   size_file("test.drat", DRAT_SIZE), 
 
   write("\n------- Elaborating DRAT to LRAT  -------\n\n"),
-  run_and_measure(["drat-trim ", CNF_FILE, " test.drat -L test.lrat"], DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM, DRAT_LRAT_AVG_MEM),
+  run_and_measure(["drat-trim ", CNF_FILE, " test.drat -L test.lrat"], DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM),
   delete_file("test.drat"), % test.lrat
   size_file("test.lrat", DRAT_LRAT_SIZE), 
 
@@ -119,7 +118,6 @@ main([CNF_FILE]) :-
   format('Missing hints : ~w%\n', MISSING),
   format('FRAT-to-LRAT time : ~w seconds\n', FRAT_LRAT_TIME),
   format('FRAT-to-LRAT peak memory usage : ~w kb\n', FRAT_LRAT_PEAK_MEM),
-  format('FRAT-to-LRAT average memory usage : ~w kb\n', FRAT_LRAT_AVG_MEM),
   
   % format('FRAT0-to-LRAT time : ~w seconds\n', FRAT0_LRAT_TIME),
   % format('FRAT1-to-LRAT time : ~w seconds\n', FRAT1_LRAT_TIME),
@@ -131,7 +129,6 @@ main([CNF_FILE]) :-
   format('DRAT file size : ~w bytes\n', DRAT_SIZE),
   format('DRAT-to-LRAT time : ~w seconds\n', DRAT_LRAT_TIME),
   format('DRAT-to-LRAT peak memory usage : ~w kb\n', DRAT_LRAT_PEAK_MEM),
-  format('DRAT-to-LRAT average memory usage : ~w kb\n', DRAT_LRAT_AVG_MEM),
 
   format('LRAT-from-DRAT file size : ~w bytes\n', DRAT_LRAT_SIZE),
   format('LRAT-from-DRAT check time (C) : ~w seconds\n', DRAT_LRAT_CHK_C_TIME),
