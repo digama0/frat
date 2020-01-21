@@ -356,7 +356,9 @@ fn build_step(ls: &[i64], ctx: &mut Context, hint: Option<&[i64]>, strict: bool)
 fn run_rat_step<'a>(ls: &[i64], ctx: &mut Context, init: &[i64],
     mut rats: Option<(&'a i64, &'a [i64])>, strict: bool) -> Vec<i64> {
   if rats.is_none() {
-    if let Some(res) = build_step(ls, ctx, None, strict) {return res}
+    if let Some(res) = build_step(ls, ctx, if init.is_empty() {None} else {Some(init)}, strict) {
+      return res
+    }
   }
   let Hint {mut reasons, ..} = propagate_hint(&ls, &ctx, init, strict).0;
   let pivot = ls[0];
