@@ -3,8 +3,10 @@ Cargo.lock
 *.cnf
 *.p
 temp
+frat_stats
 test.drat
 test.frat
+test.frat.temp
 test.lrat
 *.log
 
