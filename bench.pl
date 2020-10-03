@@ -87,7 +87,7 @@ cleanup :-
   delete_file_if_exists("test.lrat"),
   delete_file_if_exists("test.drat").
   
-bench(CNF_NAME) :- 
+bench((NUMBER, CNF_NAME)) :- 
   cleanup,
   atomic_list_concat(['probs/', CNF_NAME, '.cnf'], CNF_FILE),
   
@@ -167,30 +167,37 @@ bench(CNF_NAME) :-
   format('LRAT-from-DRAT file size : ~w bytes\n', DRAT_LRAT_SIZE),
   format('LRAT-from-DRAT check time (C) : ~w seconds\n', DRAT_LRAT_CHK_C_TIME),
   RESULT = 
-    result(
-      CNF_NAME, 
-      DIMACS_FRAT_TIME, 
-      FRAT_SIZE, 
-      MISSING, 
-      FRAT_LRAT_TIME, 
-      FRAT_LRAT_PEAK_MEM, 
-      TEMP_SIZE, 
-      FRAT_LRAT_SIZE, 
-      FRAT_LRAT_CHK_C_TIME,
-      DIMACS_DRAT_TIME, 
-      DRAT_SIZE, 
-      DRAT_LRAT_TIME, 
-      DRAT_LRAT_PEAK_MEM,
-      DRAT_LRAT_SIZE, 
-      DRAT_LRAT_CHK_C_TIME 
+    result(NUMBER, pass, CNF_NAME, 
+      [
+        DIMACS_FRAT_TIME, 
+        FRAT_SIZE, 
+        MISSING, 
+        FRAT_LRAT_TIME, 
+        FRAT_LRAT_PEAK_MEM, 
+        TEMP_SIZE, 
+        FRAT_LRAT_SIZE, 
+        FRAT_LRAT_CHK_C_TIME,
+        DIMACS_DRAT_TIME, 
+        DRAT_SIZE, 
+        DRAT_LRAT_TIME, 
+        DRAT_LRAT_PEAK_MEM,
+        DRAT_LRAT_SIZE, 
+        DRAT_LRAT_CHK_C_TIME 
+      ]
     ), 
   print_and_save(RESULT),
   true.
 
+number_list(_, [], []).
+number_list(NUM, [ELEM | LIST], [(NUM, ELEM) | TAIL]) :- 
+  num_suc(NUM, SUC),
+  number_list(SUC, LIST, TAIL).
+
 main([DROP, TAKE]) :- 
   probs(PROBS),
+  number_list(1, PROBS, NUMPROBS),
   atom_number(DROP, DROP_NUM),
   atom_number(TAKE, TAKE_NUM),
-  slice(DROP_NUM, TAKE_NUM, PROBS, SET),
+  slice(DROP_NUM, TAKE_NUM, NUMPROBS, SET),
   format("Using test set = ~w\n", [SET]), !,
   cmap(bench, SET).
