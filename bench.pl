@@ -15,6 +15,8 @@
 
 :- initialization(main, main).
 
+:- [basic, probs].
+
 read_time(String, Time) :- 
   string_concat("\tUser time (seconds): ", TimeString, String),
   number_string(Time, TimeString).
@@ -71,66 +73,67 @@ run_and_measure(Strings, TIME, PEAK_MEM) :-
   read_item(read_peak_mem, "temp", PEAK_MEM),
   delete_file("temp").
 
-print_and_log(Log, Format, Argument) :- 
-  format(Format, Argument), 
-  format(Log, Format, Argument).
+print_and_log(STRM, FORMAT, ARGS) :- 
+  format(FORMAT, ARGS), 
+  format(STRM, FORMAT, ARGS).
 
-main([CNF_FILE]) :- 
-  
-  open("bench_log", write, Log), 
+bench(CNF_NAME) :- 
+  atomic_list_concat(['probs/', CNF_NAME, '.cnf'], CNF_FILE),
+  atomic_list_concat(['logs/', CNF_NAME, '.log'], LOG),
+  open(LOG, write, STRM),
 
   write("\n------- Running Hackdical -------\n\n"),
-  run_and_time(["hackdical -q ", CNF_FILE, " test.frat --lrat=true"], DIMACS_FRAT_TIME),
-  print_and_log(Log, 'DIMACS-to-FRAT time : ~w seconds\n', DIMACS_FRAT_TIME),
+  run_and_time(["./hackdical -t 5000 -q ", CNF_FILE, " test.frat --lrat=true"], DIMACS_FRAT_TIME),
+  print_and_log(STRM, '% DIMACS-to-FRAT time : ~w seconds\n', DIMACS_FRAT_TIME),
   size_file("test.frat", FRAT_SIZE), % test.frat
-  print_and_log(Log, 'FRAT file size : ~w bytes\n', FRAT_SIZE),
+  print_and_log(STRM, '% FRAT file size : ~w bytes\n', FRAT_SIZE),
 
   write("\n------- Obtaining FRAT file statistics  -------\n\n"),
-  shell("frat-rs fratchk test.frat > frat_stats"),
+  shell("frat-rs fratchk test.frat > frat_stats", _),
   read_item(read_missing, "frat_stats", MISSING),
-  print_and_log(Log, 'Missing hints : ~w%\n', MISSING),
+  print_and_log(STRM, '% Missing hints : ~w%\n', MISSING),
   write("\nFrat statistics:\n\n"), 
-  shell("cat frat_stats"),
+  shell("cat frat_stats", _),
   delete_file("frat_stats"),
 
   write("\n------- Elaborating FRAT to LRAT -------\n\n"),
   run_and_measure(["frat-rs elab ", CNF_FILE, " test.frat test.lrat"], FRAT_LRAT_TIME, FRAT_LRAT_PEAK_MEM), % test.frat, test.frat.temp, test.lrat
   delete_file("test.frat"), % test.frat.temp, test.lrat
-  print_and_log(Log, 'FRAT-to-LRAT time : ~w seconds\n', FRAT_LRAT_TIME),
-  print_and_log(Log, 'FRAT-to-LRAT peak memory usage : ~w kb\n', FRAT_LRAT_PEAK_MEM),
+  print_and_log(STRM, '% FRAT-to-LRAT time : ~w seconds\n', FRAT_LRAT_TIME),
+  print_and_log(STRM, '% FRAT-to-LRAT peak memory usage : ~w kb\n', FRAT_LRAT_PEAK_MEM),
 
   size_file("test.frat.temp", TEMP_SIZE), 
   delete_file("test.frat.temp"), % test.lrat
-  print_and_log(Log, 'TEMP file size : ~w bytes\n', TEMP_SIZE),
+  print_and_log(STRM, '% TEMP file size : ~w bytes\n', TEMP_SIZE),
   size_file("test.lrat", FRAT_LRAT_SIZE), 
-  print_and_log(Log, 'LRAT-from-FRAT file size : ~w bytes\n', FRAT_LRAT_SIZE),
+  print_and_log(STRM, '% LRAT-from-FRAT file size : ~w bytes\n', FRAT_LRAT_SIZE),
 
   write("\n------- Checking LRAT from FRAT (C) -------\n\n"),
   run_and_time(["lrat-check ", CNF_FILE, " test.lrat"], FRAT_LRAT_CHK_C_TIME),
-  print_and_log(Log, 'LRAT-from-FRAT check time (C) : ~w seconds\n', FRAT_LRAT_CHK_C_TIME),
+  print_and_log(STRM, '% LRAT-from-FRAT check time (C) : ~w seconds\n', FRAT_LRAT_CHK_C_TIME),
 
   write("\n------- Checking LRAT from FRAT (Rust) -------\n\n"),
   run(["frat-rs lratchk ", CNF_FILE, " test.lrat 2>&1"]), 
   delete_file("test.lrat"), % test.frat
 
   write("\n------- Running Cadical -------\n\n"),
-  run_and_time(["cadical -q ", CNF_FILE, " test.drat"], DIMACS_DRAT_TIME),
-  print_and_log(Log, 'DIMACS-to-DRAT time : ~w seconds\n', DIMACS_DRAT_TIME),
+  run_and_time(["./cadical -t 5000 -q ", CNF_FILE, " test.drat"], DIMACS_DRAT_TIME),
+  print_and_log(STRM, '% DIMACS-to-DRAT time : ~w seconds\n', DIMACS_DRAT_TIME),
   size_file("test.drat", DRAT_SIZE), 
-  print_and_log(Log, 'DRAT file size : ~w bytes\n', DRAT_SIZE),
+  print_and_log(STRM, '% DRAT file size : ~w bytes\n', DRAT_SIZE),
 
 
   write("\n------- Elaborating DRAT to LRAT  -------\n\n"),
-  run_and_measure(["drat-trim ", CNF_FILE, " test.drat -L test.lrat"], DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM),
+  run_and_measure(["./drat-trim ", CNF_FILE, " test.drat -L test.lrat"], DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM),
   delete_file("test.drat"), % test.lrat
-  print_and_log(Log, 'DRAT-to-LRAT time : ~w seconds\n', DRAT_LRAT_TIME),
-  print_and_log(Log, 'DRAT-to-LRAT peak memory usage : ~w kb\n', DRAT_LRAT_PEAK_MEM),
+  print_and_log(STRM, '% DRAT-to-LRAT time : ~w seconds\n', DRAT_LRAT_TIME),
+  print_and_log(STRM, '% DRAT-to-LRAT peak memory usage : ~w kb\n', DRAT_LRAT_PEAK_MEM),
   size_file("test.lrat", DRAT_LRAT_SIZE), 
-  print_and_log(Log, 'LRAT-from-DRAT file size : ~w bytes\n', DRAT_LRAT_SIZE),
+  print_and_log(STRM, '% LRAT-from-DRAT file size : ~w bytes\n', DRAT_LRAT_SIZE),
 
   write("\n------- Checking LRAT from DRAT (C) -------\n\n"),
-  run_and_time(["lrat-check ", CNF_FILE, " test.lrat"], DRAT_LRAT_CHK_C_TIME),
-  print_and_log(Log, 'LRAT-from-DRAT check time (C) : ~w seconds\n', DRAT_LRAT_CHK_C_TIME),
+  run_and_time(["./lrat-check ", CNF_FILE, " test.lrat"], DRAT_LRAT_CHK_C_TIME),
+  print_and_log(STRM, '% LRAT-from-DRAT check time (C) : ~w seconds\n', DRAT_LRAT_CHK_C_TIME),
 
   write("\n------- Checking LRAT from DRAT (Rust) -------\n\n"),
   run(["frat-rs lratchk ", CNF_FILE, " test.lrat 2>&1"]),
@@ -152,12 +155,41 @@ main([CNF_FILE]) :-
   format('LRAT-from-DRAT file size : ~w bytes\n', DRAT_LRAT_SIZE),
   format('LRAT-from-DRAT check time (C) : ~w seconds\n', DRAT_LRAT_CHK_C_TIME),
 
-  atomic_list_concat(
-    [ DIMACS_FRAT_TIME, FRAT_SIZE, MISSING, FRAT_LRAT_TIME, 
-      FRAT_LRAT_PEAK_MEM, TEMP_SIZE, FRAT_LRAT_SIZE, FRAT_LRAT_CHK_C_TIME,
-      DIMACS_DRAT_TIME, DRAT_SIZE, DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM,
-      DRAT_LRAT_SIZE, DRAT_LRAT_CHK_C_TIME ], 
-    ", ", 
-    CSV
+  write_term(STRM, 
+    result(
+      CNF_NAME, 
+      DIMACS_FRAT_TIME, 
+      FRAT_SIZE, 
+      MISSING, 
+      FRAT_LRAT_TIME, 
+      FRAT_LRAT_PEAK_MEM, 
+      TEMP_SIZE, 
+      FRAT_LRAT_SIZE, 
+      FRAT_LRAT_CHK_C_TIME,
+      DIMACS_DRAT_TIME, 
+      DRAT_SIZE, 
+      DRAT_LRAT_TIME, 
+      DRAT_LRAT_PEAK_MEM,
+      DRAT_LRAT_SIZE, 
+      DRAT_LRAT_CHK_C_TIME 
+    ), 
+    [fullstop(true), nl(true), quoted(true)]
   ),
-  format('CSV : ~w', CSV).
+  % atomic_list_concat(
+  %   [ DIMACS_FRAT_TIME, FRAT_SIZE, MISSING, FRAT_LRAT_TIME, 
+  %     FRAT_LRAT_PEAK_MEM, TEMP_SIZE, FRAT_LRAT_SIZE, FRAT_LRAT_CHK_C_TIME,
+  %     DIMACS_DRAT_TIME, DRAT_SIZE, DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM,
+  %     DRAT_LRAT_SIZE, DRAT_LRAT_CHK_C_TIME ], 
+  %   ", ", 
+  %   CSV
+  % ),
+  % format('CSV : ~w', CSV)
+  true.
+
+main([DROP, TAKE]) :- 
+  probs(PROBS),
+  atom_number(DROP, DROP_NUM),
+  atom_number(TAKE, TAKE_NUM),
+  slice(DROP_NUM, TAKE_NUM, PROBS, SET),
+  format("Using test set = ~w\n", [SET]),
+  cmap(bench, SET).

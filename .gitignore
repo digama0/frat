@@ -2,4 +2,8 @@ target
 Cargo.lock
 *.cnf
 *.p
-a.out
+temp
+test.drat
+test.lrat
+*.log
+
