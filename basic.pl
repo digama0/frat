@@ -37,3 +37,10 @@ cmap(GOAL, [ElemA | ListA], [ElemB | ListB]) :-
   call(GOAL, ElemA, ElemB), !, 
   cmap(GOAL, ListA, ListB). 
 
+delete_file_if_exists(FILE) :-
+  exists_file(FILE) ->
+  delete_file(FILE) ; 
+  true.
+  
+  
+

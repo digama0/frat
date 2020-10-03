@@ -77,7 +77,16 @@ print_and_log(STRM, FORMAT, ARGS) :-
   format(FORMAT, ARGS), 
   format(STRM, FORMAT, ARGS).
 
+cleanup :- 
+  delete_file_if_exists("temp"),
+  delete_file_if_exists("frat_stats"),
+  delete_file_if_exists("test.frat"),
+  delete_file_if_exists("test.frat.temp"),
+  delete_file_if_exists("test.lrat"),
+  delete_file_if_exists("test.drat").
+  
 bench(CNF_NAME) :- 
+  cleanup,
   atomic_list_concat(['probs/', CNF_NAME, '.cnf'], CNF_FILE),
   atomic_list_concat(['logs/', CNF_NAME, '.log'], LOG),
   open(LOG, write, STRM),
@@ -142,6 +151,7 @@ bench(CNF_NAME) :-
   delete_file("test.lrat"), % 
 
   write("\n------- Bench Statistics -------\n\n"),
+  format('Problem name : ~w\n', CNF_NAME),
   format('DIMACS-to-FRAT time : ~w seconds\n', DIMACS_FRAT_TIME),
   format('FRAT file size : ~w bytes\n', FRAT_SIZE),
   format('Missing hints : ~w%\n', MISSING),
