@@ -1,6 +1,3 @@
-
-
-
 num_suc(NUM, SUC) :- SUC is NUM + 1.
 
 num_pre(NUM, PRE) :-

@@ -73,12 +73,6 @@ run_and_measure(Strings, TIME, PEAK_MEM) :-
   read_item(read_peak_mem, "temp", PEAK_MEM),
   delete_file("temp").
 
-print_and_save(TERM) :- 
-  open('result', append, STRM),
-  write_term(TERM, [fullstop(true), nl(true), quoted(true)]),
-  write_term(STRM, TERM, [fullstop(true), nl(true), quoted(true)]),
-  close(STRM).
-
 cleanup :- 
   delete_file_if_exists("temp"),
   delete_file_if_exists("frat_stats"),
@@ -185,7 +179,7 @@ bench((NUMBER, CNF_NAME)) :-
         DRAT_LRAT_CHK_C_TIME 
       ]
     ), 
-  print_and_save(RESULT),
+  write_term(RESULT, [fullstop(true), nl(true), quoted(true)]),
   true.
 
 number_list(_, [], []).
