@@ -4,6 +4,7 @@ Cargo.lock
 *.p
 temp
 test.drat
+test.frat
 test.lrat
 *.log
 

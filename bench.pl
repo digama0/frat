@@ -81,6 +81,8 @@ bench(CNF_NAME) :-
   atomic_list_concat(['probs/', CNF_NAME, '.cnf'], CNF_FILE),
   atomic_list_concat(['logs/', CNF_NAME, '.log'], LOG),
   open(LOG, write, STRM),
+  
+  format("\n>>>>>>>>>> Begin bench with problem = ~w <<<<<<<<<<\n\n", CNF_NAME),
 
   write("\n------- Running Hackdical -------\n\n"),
   run_and_time(["./hackdical -t 5000 -q ", CNF_FILE, " test.frat --lrat=true"], DIMACS_FRAT_TIME),
@@ -175,15 +177,6 @@ bench(CNF_NAME) :-
     ), 
     [fullstop(true), nl(true), quoted(true)]
   ),
-  % atomic_list_concat(
-  %   [ DIMACS_FRAT_TIME, FRAT_SIZE, MISSING, FRAT_LRAT_TIME, 
-  %     FRAT_LRAT_PEAK_MEM, TEMP_SIZE, FRAT_LRAT_SIZE, FRAT_LRAT_CHK_C_TIME,
-  %     DIMACS_DRAT_TIME, DRAT_SIZE, DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM,
-  %     DRAT_LRAT_SIZE, DRAT_LRAT_CHK_C_TIME ], 
-  %   ", ", 
-  %   CSV
-  % ),
-  % format('CSV : ~w', CSV)
   true.
 
 main([DROP, TAKE]) :- 
@@ -191,5 +184,5 @@ main([DROP, TAKE]) :-
   atom_number(DROP, DROP_NUM),
   atom_number(TAKE, TAKE_NUM),
   slice(DROP_NUM, TAKE_NUM, PROBS, SET),
-  format("Using test set = ~w\n", [SET]),
+  format("Using test set = ~w\n", [SET]), !,
   cmap(bench, SET).
