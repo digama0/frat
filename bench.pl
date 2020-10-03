@@ -89,7 +89,7 @@ bench(CNF_NAME) :-
   print_and_log(STRM, '% FRAT file size : ~w bytes\n', FRAT_SIZE),
 
   write("\n------- Obtaining FRAT file statistics  -------\n\n"),
-  shell("frat-rs fratchk test.frat > frat_stats", _),
+  shell("./frat-rs fratchk test.frat > frat_stats", _),
   read_item(read_missing, "frat_stats", MISSING),
   print_and_log(STRM, '% Missing hints : ~w%\n', MISSING),
   write("\nFrat statistics:\n\n"), 
@@ -97,7 +97,7 @@ bench(CNF_NAME) :-
   delete_file("frat_stats"),
 
   write("\n------- Elaborating FRAT to LRAT -------\n\n"),
-  run_and_measure(["frat-rs elab ", CNF_FILE, " test.frat test.lrat"], FRAT_LRAT_TIME, FRAT_LRAT_PEAK_MEM), % test.frat, test.frat.temp, test.lrat
+  run_and_measure(["./frat-rs elab ", CNF_FILE, " test.frat test.lrat"], FRAT_LRAT_TIME, FRAT_LRAT_PEAK_MEM), % test.frat, test.frat.temp, test.lrat
   delete_file("test.frat"), % test.frat.temp, test.lrat
   print_and_log(STRM, '% FRAT-to-LRAT time : ~w seconds\n', FRAT_LRAT_TIME),
   print_and_log(STRM, '% FRAT-to-LRAT peak memory usage : ~w kb\n', FRAT_LRAT_PEAK_MEM),
@@ -109,11 +109,11 @@ bench(CNF_NAME) :-
   print_and_log(STRM, '% LRAT-from-FRAT file size : ~w bytes\n', FRAT_LRAT_SIZE),
 
   write("\n------- Checking LRAT from FRAT (C) -------\n\n"),
-  run_and_time(["lrat-check ", CNF_FILE, " test.lrat"], FRAT_LRAT_CHK_C_TIME),
+  run_and_time(["./lrat-check ", CNF_FILE, " test.lrat"], FRAT_LRAT_CHK_C_TIME),
   print_and_log(STRM, '% LRAT-from-FRAT check time (C) : ~w seconds\n', FRAT_LRAT_CHK_C_TIME),
 
   write("\n------- Checking LRAT from FRAT (Rust) -------\n\n"),
-  run(["frat-rs lratchk ", CNF_FILE, " test.lrat 2>&1"]), 
+  run(["./frat-rs lratchk ", CNF_FILE, " test.lrat 2>&1"]), 
   delete_file("test.lrat"), % test.frat
 
   write("\n------- Running Cadical -------\n\n"),
@@ -136,7 +136,7 @@ bench(CNF_NAME) :-
   print_and_log(STRM, '% LRAT-from-DRAT check time (C) : ~w seconds\n', DRAT_LRAT_CHK_C_TIME),
 
   write("\n------- Checking LRAT from DRAT (Rust) -------\n\n"),
-  run(["frat-rs lratchk ", CNF_FILE, " test.lrat 2>&1"]),
+  run(["./frat-rs lratchk ", CNF_FILE, " test.lrat 2>&1"]),
   delete_file("test.lrat"), % 
 
   write("\n------- Bench Statistics -------\n\n"),
