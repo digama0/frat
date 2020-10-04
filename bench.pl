@@ -75,14 +75,6 @@ run_and_measure(Strings, TIME, PEAK_MEM) :-
   read_item(read_peak_mem, "temp", PEAK_MEM),
   delete_file("temp").
 
-cleanup :- 
-  delete_file_if_exists("temp"),
-  delete_file_if_exists("frat_stats"),
-  delete_file_if_exists("test.frat"),
-  delete_file_if_exists("test.frat.temp"),
-  delete_file_if_exists("test.lrat"),
-  delete_file_if_exists("test.drat").
-  
 bench(NAMES, NUM) :- 
   cleanup,
   nth1(NUM, NAMES, CNF_NAME),

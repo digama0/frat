@@ -52,3 +52,12 @@ trace_if_debug(OPTS) :-
   trace 
 ;
   true.
+
+cleanup :- 
+  delete_file_if_exists("temp"),
+  delete_file_if_exists("frat_stats"),
+  delete_file_if_exists("test.frat"),
+  delete_file_if_exists("test.frat.temp"),
+  delete_file_if_exists("test.lrat"),
+  delete_file_if_exists("test.drat").
+  
