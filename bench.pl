@@ -27,7 +27,7 @@ read_missing(String, Missing) :-
   string_concat(MissingStr, "%)", Temp1), 
   number_string(Missing, MissingStr).
 
-read_peak_mem(String, PeakMem) :- 
+read_peak_mem(String, PeakMem) :-
   string_concat("\tMaximum resident set size (kbytes): ", PeakMemStr, String), 
   number_string(PeakMem, PeakMemStr).
 
@@ -53,14 +53,15 @@ read_item(Goal, File, Time) :-
   open(File, read, Stream), 
   read_item_core(Goal, Stream, Time).
 
-run(Strings) :- 
+run(Strings, STAT) :- 
   atomic_list_concat(Strings, CMD),
-  shell(CMD, _).
+  shell(CMD, STAT).
 
-run_and_time(Strings, TIME) :- 
-  atomic_list_concat(Strings, CMD),
+run_and_time(STRS, TIME, STAT) :- 
+  atomic_list_concat(STRS, CMD),
   atomic_list_concat(["time -v ", CMD, " 2> temp"], TIME_CMD),
-  shell(TIME_CMD, _),
+  shell(TIME_CMD, STAT),
+  shell("cat temp", 0),
   read_item(read_time, "temp", TIME),
   delete_file("temp").
 
@@ -69,6 +70,7 @@ run_and_measure(Strings, TIME, PEAK_MEM) :-
   format('Using command ~w\n', CMD),
   atomic_list_concat(["time -v ", CMD, " 2> temp"], TIME_CMD),
   shell(TIME_CMD, _),
+  shell("cat temp", 0),
   read_item(read_time, "temp", TIME),
   read_item(read_peak_mem, "temp", PEAK_MEM),
   delete_file("temp").
@@ -89,7 +91,7 @@ bench(NAMES, NUM) :-
   format("\n>>>>>>>>>> Begin bench with problem = ~w <<<<<<<<<<\n\n", CNF_NAME),
 
   write("\n------- Running Hackdical -------\n\n"),
-  run_and_time(["./hackdical -t 5000 -q ", CNF_FILE, " test.frat --lrat=true"], DIMACS_FRAT_TIME),
+  run_and_time(["./hackdical -t 5000 -q ", CNF_FILE, " test.frat --lrat=true"], DIMACS_FRAT_TIME, 20),
   format('% DIMACS-to-FRAT time : ~w seconds\n', DIMACS_FRAT_TIME),
   size_file("test.frat", FRAT_SIZE), % test.frat
   format('% FRAT file size : ~w bytes\n', FRAT_SIZE),
@@ -98,8 +100,8 @@ bench(NAMES, NUM) :-
   shell("./frat-rs fratchk test.frat > frat_stats", _),
   read_item(read_missing, "frat_stats", MISSING),
   format('% Missing hints : ~w%\n', MISSING),
-  write("\nFrat statistics:\n\n"), 
-  shell("cat frat_stats", _),
+  % write("\nFrat statistics:\n\n"), 
+  % shell("cat frat_stats", _),
   delete_file("frat_stats"),
 
   write("\n------- Elaborating FRAT to LRAT -------\n\n"),
@@ -115,15 +117,15 @@ bench(NAMES, NUM) :-
   format('% LRAT-from-FRAT file size : ~w bytes\n', FRAT_LRAT_SIZE),
 
   write("\n------- Checking LRAT from FRAT (C) -------\n\n"),
-  run_and_time(["./lrat-check ", CNF_FILE, " test.lrat"], FRAT_LRAT_CHK_C_TIME),
+  run_and_time(["./lrat-check ", CNF_FILE, " test.lrat"], FRAT_LRAT_CHK_C_TIME, 0),
   format('% LRAT-from-FRAT check time (C) : ~w seconds\n', FRAT_LRAT_CHK_C_TIME),
 
-  write("\n------- Checking LRAT from FRAT (Rust) -------\n\n"),
-  run(["./frat-rs lratchk ", CNF_FILE, " test.lrat 2>&1"]), 
-  delete_file("test.lrat"), % test.frat
+  % write("\n------- Checking LRAT from FRAT (Rust) -------\n\n"),
+  % run(["./frat-rs lratchk ", CNF_FILE, " test.lrat"], 0), 
+  % delete_file("test.lrat"), % test.frat
 
   write("\n------- Running Cadical -------\n\n"),
-  run_and_time(["./cadical -t 5000 -q ", CNF_FILE, " test.drat"], DIMACS_DRAT_TIME),
+  run_and_time(["./cadical -t 5000 -q ", CNF_FILE, " test.drat"], DIMACS_DRAT_TIME, 20),
   format('% DIMACS-to-DRAT time : ~w seconds\n', DIMACS_DRAT_TIME),
   size_file("test.drat", DRAT_SIZE), 
   format('% DRAT file size : ~w bytes\n', DRAT_SIZE),
@@ -138,12 +140,12 @@ bench(NAMES, NUM) :-
   format('% LRAT-from-DRAT file size : ~w bytes\n', DRAT_LRAT_SIZE),
 
   write("\n------- Checking LRAT from DRAT (C) -------\n\n"),
-  run_and_time(["./lrat-check ", CNF_FILE, " test.lrat"], DRAT_LRAT_CHK_C_TIME),
+  run_and_time(["./lrat-check ", CNF_FILE, " test.lrat"], DRAT_LRAT_CHK_C_TIME, 0),
   format('% LRAT-from-DRAT check time (C) : ~w seconds\n', DRAT_LRAT_CHK_C_TIME),
 
-  write("\n------- Checking LRAT from DRAT (Rust) -------\n\n"),
-  run(["./frat-rs lratchk ", CNF_FILE, " test.lrat 2>&1"]),
-  delete_file("test.lrat"), % 
+  % write("\n------- Checking LRAT from DRAT (Rust) -------\n\n"),
+  % run(["./frat-rs lratchk ", CNF_FILE, " test.lrat"], 0),
+  % delete_file("test.lrat"), % 
 
   write("\n------- Bench Statistics -------\n\n"),
   format('Problem name : ~w\n', CNF_NAME),
@@ -181,6 +183,9 @@ bench(NAMES, NUM) :-
       ]
     ), 
   write_term(RESULT, [fullstop(true), nl(true), quoted(true)]),
+  open('log', append, STRM),
+  write_term(STRM, RESULT, [fullstop(true), nl(true), quoted(true)]),
+  close(STRM),
   true.
 
 number_list(_, [], []).

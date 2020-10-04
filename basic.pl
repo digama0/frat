@@ -45,3 +45,10 @@ delete_file_if_exists(FILE) :-
   
   
 
+trace_if_debug(OPTS) :-
+  member('--debug', OPTS) ->
+  write("Begin tracing.\n\n"),
+  guitracer,
+  trace 
+;
+  true.
