@@ -65,11 +65,11 @@ run_and_time(STRS, TIME, STAT) :-
   read_item(read_time, "temp", TIME),
   delete_file("temp").
 
-run_and_measure(Strings, TIME, PEAK_MEM) :- 
+run_and_measure(Strings, TIME, PEAK_MEM, STAT) :- 
   atomic_list_concat(Strings, CMD),
   format('Using command ~w\n', CMD),
   atomic_list_concat(["time -v ", CMD, " 2> temp"], TIME_CMD),
-  shell(TIME_CMD, _),
+  shell(TIME_CMD, STAT),
   shell("cat temp", 0),
   read_item(read_time, "temp", TIME),
   read_item(read_peak_mem, "temp", PEAK_MEM),
@@ -97,7 +97,7 @@ bench(NAMES, NUM) :-
   delete_file("frat_stats"),
 
   write("\n------- Elaborating FRAT to LRAT -------\n\n"),
-  run_and_measure(["./frat-rs elab ", CNF_FILE, " test.frat test.lrat"], FRAT_LRAT_TIME, FRAT_LRAT_PEAK_MEM), % test.frat, test.frat.temp, test.lrat
+  run_and_measure(["./frat-rs elab ", CNF_FILE, " test.frat test.lrat"], FRAT_LRAT_TIME, FRAT_LRAT_PEAK_MEM, 0), % test.frat, test.frat.temp, test.lrat
   delete_file("test.frat"), % test.frat.temp, test.lrat
   format('% FRAT-to-LRAT time : ~w seconds\n', FRAT_LRAT_TIME),
   format('% FRAT-to-LRAT peak memory usage : ~w kb\n', FRAT_LRAT_PEAK_MEM),
@@ -124,7 +124,7 @@ bench(NAMES, NUM) :-
 
 
   write("\n------- Elaborating DRAT to LRAT  -------\n\n"),
-  run_and_measure(["./drat-trim ", CNF_FILE, " test.drat -L test.lrat"], DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM),
+  run_and_measure(["./drat-trim ", CNF_FILE, " test.drat -L test.lrat"], DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM, 0),
   delete_file("test.drat"), % test.lrat
   format('% DRAT-to-LRAT time : ~w seconds\n', DRAT_LRAT_TIME),
   format('% DRAT-to-LRAT peak memory usage : ~w kb\n', DRAT_LRAT_PEAK_MEM),
