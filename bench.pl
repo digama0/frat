@@ -80,7 +80,7 @@ bench(NAMES, NUM) :-
   nth1(NUM, NAMES, CNF_NAME),
   atomic_list_concat(['probs/', CNF_NAME, '.cnf'], CNF_FILE),
   
-  format("\n>>>>>>>>>> Begin bench with problem = ~w <<<<<<<<<<\n\n", CNF_NAME),
+  format("\n>>>>>>>>>> Begin bench with problem number = ~w, problem name = ~w <<<<<<<<<<\n\n", [NUM, CNF_NAME]),
 
   write("\n------- Running Hackdical -------\n\n"),
   run_and_time(["./hackdical -t 5000 -q ", CNF_FILE, " test.frat --lrat=true"], DIMACS_FRAT_TIME, 20),

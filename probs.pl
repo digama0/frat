@@ -20,25 +20,25 @@ result(19, fail, 'QG7a-gensys-icl001.sat05-3822.reshuffled-07-sc2007', "Using de
 result(20, fail, _, ["Using deleted clause"]).
 result(21, fail, 'SAT_dat.k100-sc2012', ["Clause already watched"]).
 result(22, fail, _, ["Using deleted clause"]).
-
+result(23, fail, _, "FRAT : passed, Elaborating DRAT to LRAT : failed").
 result(24, fail, 'T103.2.1-sc2017', "Checking LRAT from FRAT : using DELETED clause").
 result(25, fail, 'Trivium_no_init_out350_known_last142_1_u', "FRAT pass, DRAT-trim killed").
-
+result(26, pass, 'Trivium_no_init_out350_known_last143_1_u',[1568.55,2158104966,1.2,194.97,82572,1123720827,2362060386,54.23,1426.11,719437187,2762.46,2863068,2579432842,58.61]).
 result(27, fail, _, "Checking LRAT from FRAT : using DELETED clause").
 result(28, fail, 'UTI-20-5p0-sc2009', "Checking LRAT from FRAT : using DELETED clause").
 result(29, pass, 'aaai10-planning-ipc5-TPP-21-step11-sc2011',[370.43,943432865,47.1,131.57,166304,333023922,676160921,15.52,355.08,594516003,412.66,960948,681543066,15.37]).
 result(30, pass, 'ablmulub16x4o-sc2016', [116.0,1051570994,6.9,87.49,40776,878796001,1902066601,39.82,97.21,173646641,179.55,1529692,1974675464,40.82]).
 result(31, pass, 'ablmulub2x32o-sc2016', [214.03, 1361518641, 3.0, 94.56, 46136, 905547190, 1929160191, 39.46, 192.53, 355909293, 455.22, 1813288, 2127147566, 42.25]).
-
-
+result(32, pass, 'aes_equiv_encry_3_rounds.debugged-sc2012',[615.2,1821180072,24.5,20418.24,664204,221565350,438445436,9.53,511.65,981986300,3093.02,1530512,491730061,10.09]).
+result(33, fail, _, "bad LRAT proof").
 result(34, pass, 'atco_enc3_opt2_10_12-sc2014',[1204.67,286111482,55.3,474.63,1068044,50556944,101891639,3.91,1177.66,80278950,269.5,677608,141160739,4.44]).
 result(35, fail, 'b1904P3-8x8c11h7UNSAT', "Checking LRAT from FRAT : using DELETED clause").
-
+result(36, pass, 'b_unsat-sc2013',[1482.23,2424248332,67.9,725.53,269508,1533643163,3296823053,76.18,1194.17,577541910,2943.03,2704024,3189424269,78.56]).
 result(37, fail, 'blockpuzzle_5x10_s3_free4-sc2017', "FRAT : using deleted clause").
-
-result(39, fail, _, "Both Hackdical and Cadical says 'unknown'").
-
-
+result(38, redo, _, "Try with more space than 32GB. Hackdical says unknown, Cadiacal says unsat but not verified yet.").
+result(39, redo, _, "Try with more space. Both Hackdical and Cadical says 'unknown'").
+result(40, pass,'bob12s06-sc2013',[1785.42,3527760888,45.0,726.97,425428,1500737644,3083538026,57.82,1833.35,1172053442,5284.44,3305992,3751371402,69.64]).
+result(41, pass,'c6288mul.miter.shuffled-as.sat03-346-sc2002',[1054.38,3191405091,10.5,58.15,119768,90876601,184201213,3.97,990.36,1037665672,149.21,1311200,155736082,3.16]).
 result(42, pass,'countbitssrl032-sc2009',[79.26,566957064,26.1,51.0,39008,246031234,544633798,11.6,45.65,58865732,65.17,491808,647189009,13.37]).
 result(43, pass,'countbitswegner128-sc2011',[979.51,6500565952,15.4,433.29,297196,1250511905,2490934104,49.26,921.14,3421873627,867.83,3609716,0,0.11]).
 result(44, pass,'crafted_n11_d6_c3_num24-sc2013',[185.74,1188411153,30.7,200.05,838584,337423671,679208949,14.21,155.92,825607169,202.31,1401216,654108854,13.58]).
@@ -61,12 +61,12 @@ result(60, fail, _, "Clause 4952654 to be accessed does not exist").
 result(61, pass, 'f6nidw-sc2012', [12.41,62403221,16.9,4.3,137704,3756323,6761181,0.37,10.34,32513391,3.53,131024,9705073,0.41]).
 result(62, fail, 'gensys-icl005.shuffled-as.sat05-3826-sc2011', ["ERROR: using DELETED clause", "thread 'main' panicked at 'at Some(22613): Clause 18303 to be accessed does not exist'"]).
 result(63, pass, 'gto_p60c238-sc2018', [300.07,1049191617,0.1,78.2,57180,635122738,1297997512,29.61,272.12,559309454,655.75,1826056,1354892953,29.85]).
-result(64, pass,'hwb-n26-01-S1957858365.shuffled-as.sat03-1622-sc2002',[1261.17,1678042418,0.3,157.05,68304,885810978,1799336943,44.18,1206.15,737038518,2896.17,2709948,1966716214,44.72]).
-result(65, pass,'hwb-n26-03-S540351185.sat05-490.reshuffled-07-sc2007',[1409.55,1764322803,0.3,172.46,78988,977930273,1997876623,47.97,1340.96,769901842,2960.82,2999448,2187925448,49.87]).
-result(66, pass,'hwmcc10-timeframe-expansion-k45-pdtpmspalu-tseitin-sc2011',[2381.74,5426895470,8.5,81.72,343352,215123167,441228269,8.67,2324.39,3646955441,288.52,3469744,569680607,10.74]).
-result(67, fail,'hwmcc15deep-6s516r-k18-sc2017', ["bad LRAT proof"]).
-
-
+result(64, pass, 'hwb-n26-01-S1957858365.shuffled-as.sat03-1622-sc2002',[1261.17,1678042418,0.3,157.05,68304,885810978,1799336943,44.18,1206.15,737038518,2896.17,2709948,1966716214,44.72]).
+result(65, pass, 'hwb-n26-03-S540351185.sat05-490.reshuffled-07-sc2007',[1409.55,1764322803,0.3,172.46,78988,977930273,1997876623,47.97,1340.96,769901842,2960.82,2999448,2187925448,49.87]).
+result(66, pass, 'hwmcc10-timeframe-expansion-k45-pdtpmspalu-tseitin-sc2011',[2381.74,5426895470,8.5,81.72,343352,215123167,441228269,8.67,2324.39,3646955441,288.52,3469744,569680607,10.74]).
+result(67, fail, 'hwmcc15deep-6s516r-k18-sc2017', ["bad LRAT proof"]).
+result(68, pass, 'hwmcc15deep-oski15a10b10s-k22-sc2017',[2385.95,4190546016,43.8,506.26,438732,856106470,1764128431,35.43,2175.82,1681381754,797.32,2461356,1183755495,24.57]).
+result(69, pass, 'manthey_single-ordered-initialized-w50-b7-sr2015',[1461.96,2001752355,4.7,197.31,106324,1181358952,2445610382,55.65,1382.33,745019207,1983.65,2671224,2442904458,54.41]).
 result(70, pass, 'maxxor032-sc2011',[34.69,192562768,14.5,6.38,31616,30790459,65726059,1.39,31.55,103647358,12.06,182352,50467886,1.05]).
 result(71, fail, 'minormax...', ["FRAT pass, DRAT fail. Check-only drat-trim succeeds, but LRAT production is 'killed'. Did not run out of disk space."]).
 result(72, fail, 'mod2...', ["FRAT pass, DRAT fail. Check-only drat-trim succeeds, but LRAT production is 'killed'. Did not run out of disk space."]).
@@ -91,10 +91,12 @@ result(90, fail, 'sokoban-p16.sas.ex.15-sc2016', "FRAT all pass, DRAT-trim kille
 result(91, pass,'squ_any_s09x07_c27_abio_UNS-sc2017',[1156.61,1047390662,0.6,114.02,75180,503866734,1087164057,26.02,951.7,370644633,1435.98,1631644,1127234778,26.45]).
 result(92, pass,'sv-comp19_prop-reachsafety.newton_2_2_true-unreach-call_true-termination.i-witness',[703.55,3329154835,79.6,242.31,184384,38913451,75249529,1.79,279.98,305606199,34.74,432580,96632382,2.27]).
 result(93, pass,'sv-comp19_prop-reachsafety.newton_2_3_true-unreach-call_true-termination.i-witness',[466.41,2478359255,75.9,418.36,196352,869063973,1796440586,41.06,309.64,540634559,53.21,603004,77646250,1.87]).
-result(94,pass,'sv-comp19_prop-reachsafety.newton_2_4_true-unreach-call_true-termination.i-witness',[404.34,1750333836,79.0,171.21,177932,128410267,258984057,6.57,633.82,429387123,46.54,550204,101235442,2.3]).
+result(94, pass,'sv-comp19_prop-reachsafety.newton_2_4_true-unreach-call_true-termination.i-witness',[404.34,1750333836,79.0,171.21,177932,128410267,258984057,6.57,633.82,429387123,46.54,550204,101235442,2.3]).
 result(95, pass,'sv-comp19_prop-reachsafety.sine_8_true-unreach-call_true-termination.i-witness',[47.61,366288551,69.2,5.23,39380,2920767,5412191,0.16,187.09,42746056,2.88,122960,5904107,0.17]).
 result(96, pass,'sv-comp19_prop-reachsafety.square_5_true-unreach-call_true-termination.i-witness',[289.74,2821017166,42.5,314.99,59608,2500223238,5387273973,114.71,141.4,66899626,130.01,1587840,2425281073,48.45]).
 result(97, redo, _, "UNKNOWN").
 
 
 probs(['11pipe_11_ooo-sc2011','6s126-opt-sc2014','6s133-sc2014','6s139-sc2013','6s166-sc2013','6s169-opt-sc2014','6s20-sc2013','9dlx_vliw_at_b_iq8-sc2007','9pipe_k-sc2012','ASG_96_len112_known_last13_2_u','Grain_no_init_ver1_out200_known_last104_0_u','Grain_no_init_ver1_out200_known_last105_0_u','Haystacks-ext-12_c18','LABS_n071_goal001-sc2013','MUS-v310-4-sc2013','Mickey_out250_known_last146_0_u','Mickey_out250_known_last147_0_u','Nb51T6-sc2018','QG7a-gensys-icl001.sat05-3822.reshuffled-07-sc2007','QG7a-gensys-ukn002.sat05-3842.reshuffled-07-sc2007','SAT_dat.k100-sc2012','SAT_dat.k85-sc2013','SGI_30_60_24_40_2-dir.shuffled-as.sat03-118-sc2002','T103.2.1-sc2017','Trivium_no_init_out350_known_last142_1_u','Trivium_no_init_out350_known_last143_1_u','UTI-20-10p0-sc2009','UTI-20-5p0-sc2009','aaai10-planning-ipc5-TPP-21-step11-sc2011','ablmulub16x4o-sc2016','ablmulub2x32o-sc2016','aes_equiv_encry_3_rounds.debugged-sc2012','atco_enc1_opt2_20_12-sc2014','atco_enc3_opt2_10_12-sc2014','b1904P3-8x8c11h7UNSAT','b_unsat-sc2013','blockpuzzle_5x10_s3_free4-sc2017','blocks-blocks-36-0.120-NOTKNOWN-sc2011','blocks-blocks-37-1.130-NOTKNOWN-sc2011','bob12s06-sc2013','c6288mul.miter.shuffled-as.sat03-346-sc2002','countbitssrl032-sc2009','countbitswegner128-sc2011','crafted_n11_d6_c3_num24-sc2013',cruxmiter28seed8,cruxmiter29seed4,cruxmiter29seed9,'ctl_4291_567_2_unsat-sc2013','ctl_4291_567_2_unsat_pre-sc2013','dist6.c-sc2018','dp12u11.used-as.sat04-358-sc2004','e_rphp035_05-sc2018',eqbpdtlf12bparrc12,eqbpdtlf14bpwtcl14,eqbpwtcl10spwtcl10,eqbpwtrc10bpdtlf10,eqbpwtrc10spctbk10,eqsparcl10bpwtrc10,'ex051_9-sc2018','f10nidw-sc2012','f6nidw-sc2012','gensys-icl005.shuffled-as.sat05-3826-sc2011','gto_p60c238-sc2018','hwb-n26-01-S1957858365.shuffled-as.sat03-1622-sc2002','hwb-n26-03-S540351185.sat05-490.reshuffled-07-sc2007','hwmcc10-timeframe-expansion-k45-pdtpmspalu-tseitin-sc2011','hwmcc15deep-6s516r-k18-sc2017','hwmcc15deep-oski15a10b10s-k22-sc2017','manthey_single-ordered-initialized-w50-b7-sr2015','maxxor032-sc2011','minxorminand128-sc2009','mod2c-3cage-unsat-10-3.sat05-2568.reshuffled-07-sc2007','pb_300_10_lb_08-sc2014','ps_5000_21250_3_0_0.8_0_1.55_2-sc2017','rubikcube701-sc2017',size_4_4_4_i0418_r8,size_4_4_4_i0566_r8,size_4_4_4_i2704_r8,size_4_4_4_i3499_r8,size_4_4_4_i4096_r8,size_4_4_4_i4295_r8,size_4_4_4_i4473_r8,size_4_4_4_i4828_r8,'slp-synthesis-aes-bottom13-sc2011','smtlib-qfbv-aigs-countbits128-tseitin-sc2011','smulo032-sc2012','snw_13_8_pre-sc2016','snw_16_8_nopre-sc2016','snw_16_8_pre-sc2016','sokoban-p16.sas.ex.15-sc2016','squ_any_s09x07_c27_abio_UNS-sc2017','sv-comp19_prop-reachsafety.newton_2_2_true-unreach-call_true-termination.i-witness','sv-comp19_prop-reachsafety.newton_2_3_true-unreach-call_true-termination.i-witness','sv-comp19_prop-reachsafety.newton_2_4_true-unreach-call_true-termination.i-witness','sv-comp19_prop-reachsafety.sine_8_true-unreach-call_true-termination.i-witness','sv-comp19_prop-reachsafety.square_5_true-unreach-call_true-termination.i-witness','uniqinv47prop-sc2018']).
+
+second_result(94, pass,'sv-comp19_prop-reachsafety.newton_2_4_true-unreach-call_true-termination.i-witness',[414.51,1750333836,79.0,181.46,177888,128410267,258984057,6.68,659.92,429387123,50.49,550292,101235442,2.52]).
