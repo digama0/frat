@@ -2,6 +2,12 @@ num_suc(NUM, SUC) :- SUC is NUM + 1.
 
 num_pre(NUM, PRE) :- PRE is NUM - 1.
 
+nth(0, [ELEM | _], ELEM).
+nth(NUM, [_ | LIST], ELEM) :-
+  0 < NUM, 
+  num_pre(NUM, PRE),
+  nth(PRE, LIST, ELEM).
+
 nth1(1, [ELEM | _], ELEM).
 nth1(NUM, [_ | LIST], ELEM) :-
   1 < NUM, 
