@@ -2,7 +2,7 @@
 
 result(1, pass, fail(""), ['11pipe_11_ooo-sc2011']). 
 result(2, pass, pass, ['6s126-opt-sc2014', 1579.73,12958196995,6.4,1196.8,552376,197394055,379997318,7.7,776.05,1735010819,506.96,2350748,278265719,6.0]).
-result(3, fail("fratchk : bad LRAT proof"), pass, ['6s133-sc2014']). 
+result(3, fail("bad LRAT proof"), pass, ['6s133-sc2014']). 
 result(4, pass, pass, ['6s139-sc2013', 1424.27,1264726468,61.2,962.53,545840,271271036,540185625,11.57,1270.12,615612187,1705.06,1298540,671128470,13.93]).
 result(5, pass, pass, ['6s166-sc2013', 24.74,122762708,5.1,2.84,25444,12693327,28369105,0.65,21.42,45831752,5.59,127668,20861696,0.45]).
 result(6, pass, pass, ['6s169-opt-sc2014', 13.3,74647474,7.2,1.29,17808,5710587,11854416,0.27,13.38,31779940,2.89,109316,12815434,0.28]). % 6
@@ -18,27 +18,27 @@ result(15, pass, pass, ['MUS-v310-4-sc2013',1957.19,1545285958,0.1,105.97,90660,
 result(16, pass, fail(""), ['Mickey_out250_known_last146_0_u']).  
 result(17, pass, pass, ['Mickey_out250_known_last147_0_u',249.26,1650742239,20.3,138.58,150056,928576292,1890044740,38.51,491.1,404579504,455.58,2462684,3545204128,84.53]).
 result(18, pass, pass, ['Nb51T6-sc2018',4606.55,1968650933,0.0,120.51,3595168,137609416,289489316,9.83,4104.48,875391672,873.99,3011864,360091041,10.67]).
-result(19, fail("Using deleted clause"), pass, ['QG7a-gensys-icl001.sat05-3822.reshuffled-07-sc2007']).
-result(20, fail("Using deleted clause"), pass, ['QG7a-gensys-ukn002.sat05-3842.reshuffled-07-sc2007']).
-result(21, fail("FRAT : Clause already watched"), pass, ['SAT_dat.k100-sc2012']).
-result(22, fail("FRAT : Using deleted clause"), pass, ['SAT_dat.k85-sc2013']).
+result(19, fail("using deleted clause"), pass, ['QG7a-gensys-icl001.sat05-3822.reshuffled-07-sc2007']).
+result(20, fail("using deleted clause"), pass, ['QG7a-gensys-ukn002.sat05-3842.reshuffled-07-sc2007']).
+result(21, fail("clause already watched"), pass, ['SAT_dat.k100-sc2012']).
+result(22, fail("using deleted clause"), pass, ['SAT_dat.k85-sc2013']).
 result(23, pass, fail("check but no elab"), ['SGI_30_60_24_40_2-dir.shuffled-as.sat03-118-sc2002']).
 result(24, fail("using deleted clause"), pass, ['T103.2.1-sc2017']).
 result(25, pass, fail("DRAT-trim killed"), ['Trivium_no_init_out350_known_last142_1_u']).
 result(26, pass, pass, ['Trivium_no_init_out350_known_last143_1_u',1568.55,2158104966,1.2,194.97,82572,1123720827,2362060386,54.23,1426.11,719437187,2762.46,2863068,2579432842,58.61]).
-result(27, fail("Checking LRAT from FRAT : using DELETED clause"), fail("Check but no elab"), ['UTI-20-10p0-sc2009']).
-result(28, fail("Checking LRAT from FRAT : using DELETED clause"), pass, ['UTI-20-5p0-sc2009']).
+result(27, fail("using deleted clause"), fail("Check but no elab"), ['UTI-20-10p0-sc2009']).
+result(28, fail("using deleted clause"), pass, ['UTI-20-5p0-sc2009']).
 result(29, pass, pass, ['aaai10-planning-ipc5-TPP-21-step11-sc2011',370.43,943432865,47.1,131.57,166304,333023922,676160921,15.52,355.08,594516003,412.66,960948,681543066,15.37]).
 result(30, pass, pass, ['ablmulub16x4o-sc2016',116.0,1051570994,6.9,87.49,40776,878796001,1902066601,39.82,97.21,173646641,179.55,1529692,1974675464,40.82]).
 result(31, pass, pass, ['ablmulub2x32o-sc2016',214.03, 1361518641, 3.0, 94.56, 46136, 905547190, 1929160191, 39.46, 192.53, 355909293, 455.22, 1813288, 2127147566, 42.25]).
 result(32, pass, pass, ['aes_equiv_encry_3_rounds.debugged-sc2012',615.2,1821180072,24.5,20418.24,664204,221565350,438445436,9.53,511.65,981986300,3093.02,1530512,491730061,10.09]).
 result(33, fail("bad LRAT proof"), pass, ['atco_enc1_opt2_20_12-sc2014']).
 result(34, pass, pass, ['atco_enc3_opt2_10_12-sc2014',1204.67,286111482,55.3,474.63,1068044,50556944,101891639,3.91,1177.66,80278950,269.5,677608,141160739,4.44]).
-result(35, fail("Checking LRAT from FRAT : using DELETED clause"), pass, ['b1904P3-8x8c11h7UNSAT']).
+result(35, fail("using deleted clause"), pass, ['b1904P3-8x8c11h7UNSAT']).
 result(36, pass, pass, ['b_unsat-sc2013',1482.23,2424248332,67.9,725.53,269508,1533643163,3296823053,76.18,1194.17,577541910,2943.03,2704024,3189424269,78.56]).
 result(37, fail("using deleted clause"), fail("elab fail"), ['blockpuzzle_5x10_s3_free4-sc2017']). 
-result(38, fail("Hackdical timeout"), fail("Cadical timeout"), ['blocks-blocks-36-0.120-NOTKNOWN-sc2011']).
-result(39, fail("Hackdical timeout"), fail("No check, no elab"), ['blocks-blocks-37-1.130-NOTKNOWN-sc2011']). 
+result(38, fail("Hackdical fail"), fail("Cadical fail"), ['blocks-blocks-36-0.120-NOTKNOWN-sc2011']).
+result(39, fail("Hackdical fail"), fail("no check, no elab"), ['blocks-blocks-37-1.130-NOTKNOWN-sc2011']). 
 result(40, pass, pass, ['bob12s06-sc2013',1785.42,3527760888,45.0,726.97,425428,1500737644,3083538026,57.82,1833.35,1172053442,5284.44,3305992,3751371402,69.64]).
 result(41, pass, pass, ['c6288mul.miter.shuffled-as.sat03-346-sc2002',1054.38,3191405091,10.5,58.15,119768,90876601,184201213,3.97,990.36,1037665672,149.21,1311200,155736082,3.16]).
 result(42, pass, pass, ['countbitssrl032-sc2009',79.26,566957064,26.1,51.0,39008,246031234,544633798,11.6,45.65,58865732,65.17,491808,647189009,13.37]).
@@ -59,9 +59,9 @@ result(56, pass, pass, [eqbpwtrc10bpdtlf10,305.66,922578994,4.0,83.1,55516,53437
 result(57, pass, pass, [eqbpwtrc10spctbk10,331.34,1189138741,1.8,100.96,45688,807685876,1714031765,38.59,308.4,237319721,610.87,1588096,1832607734,40.44]).
 result(58, pass, pass, [eqsparcl10bpwtrc10,304.26,1077162165,2.4,89.79,44912,667630912,1408422214,31.67,283.63,238036098,542.16,1396712,1536026189,33.42]).
 result(59, fail("bad LRAT proof"), pass, ['ex051_9-sc2018']).
-result(60, fail("Clause 4952654 to be accessed does not exist"), pass, ['f10nidw-sc2012']).
+result(60, fail("clause to be accessed does not exist"), pass, ['f10nidw-sc2012']).
 result(61, pass, pass, ['f6nidw-sc2012',12.41,62403221,16.9,4.3,137704,3756323,6761181,0.37,10.34,32513391,3.53,131024,9705073,0.41]).
-result(62, fail("Using deleted clause"), pass, ['gensys-icl005.shuffled-as.sat05-3826-sc2011']).
+result(62, fail("using deleted clause"), pass, ['gensys-icl005.shuffled-as.sat05-3826-sc2011']).
 result(63, pass, pass, ['gto_p60c238-sc2018',300.07,1049191617,0.1,78.2,57180,635122738,1297997512,29.61,272.12,559309454,655.75,1826056,1354892953,29.85]).
 result(64, pass, pass, ['hwb-n26-01-S1957858365.shuffled-as.sat03-1622-sc2002',1261.17,1678042418,0.3,157.05,68304,885810978,1799336943,44.18,1206.15,737038518,2896.17,2709948,1966716214,44.72]).
 result(65, pass, pass, ['hwb-n26-03-S540351185.sat05-490.reshuffled-07-sc2007',1409.55,1764322803,0.3,172.46,78988,977930273,1997876623,47.97,1340.96,769901842,2960.82,2999448,2187925448,49.87]).
@@ -96,7 +96,7 @@ result(93, pass, pass, ['sv-comp19_prop-reachsafety.newton_2_3_true-unreach-call
 result(94, pass, pass, ['sv-comp19_prop-reachsafety.newton_2_4_true-unreach-call_true-termination.i-witness',404.34,1750333836,79.0,171.21,177932,128410267,258984057,6.57,633.82,429387123,46.54,550204,101235442,2.3]).
 result(95, pass, pass, ['sv-comp19_prop-reachsafety.sine_8_true-unreach-call_true-termination.i-witness',47.61,366288551,69.2,5.23,39380,2920767,5412191,0.16,187.09,42746056,2.88,122960,5904107,0.17]).
 result(96, pass, pass, ['sv-comp19_prop-reachsafety.square_5_true-unreach-call_true-termination.i-witness',289.74,2821017166,42.5,314.99,59608,2500223238,5387273973,114.71,141.4,66899626,130.01,1587840,2425281073,48.45]).
-result(97, fail("Hackdical 'UNKNOWN'"), fail("Cadical 'UNKNOWN'"), ['uniqinv47prop-sc2018']). 
+result(97, fail("Hackdical fail"), fail("Cadical fail"), ['uniqinv47prop-sc2018']). 
 
 well_formed(pass).
 well_formed(fail(_)).
