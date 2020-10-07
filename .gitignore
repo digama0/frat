@@ -1,6 +1,6 @@
 target
 Cargo.lock
-*.cnf
+probs/
 *.p
 temp
 frat_stats
