@@ -412,6 +412,7 @@ fn run_rat_step<'a>(ls: &[i64], ctx: &mut Context, init: &[i64],
 fn elab<M: Mode>(mode: M, full: bool, frat: File, temp: File) -> io::Result<()> {
   let w = &mut BufWriter::new(temp);
   let mut ctx: Context = Context::new();
+  let mut origs = Vec::new();
 
   for s in StepParser::new(mode, frat)? {
     // eprintln!("<- {:?}", s);
@@ -420,7 +421,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, temp: File) -> io::Result<()> 
       Step::Orig(i, ls) => {
         ctx.step = Some(i);
         if full || ctx.marked(i) {  // If the original clause is marked
-          ElabStep::Orig(i, ls).write(w).expect("Failed to write orig step");
+          origs.push((i, ls)); // delay origs to the end
         }
         // else { eprintln!("delete {}", i); }
         ctx.remove(i);
@@ -479,11 +480,36 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, temp: File) -> io::Result<()> 
     }
   }
 
+  for (i, ls) in origs {
+    ElabStep::Orig(i, ls).write(w).expect("Failed to write orig step");
+  }
+
   w.flush()
 }
 
 fn find_new_watch(c: &Clause, va: &VAssign) -> Option<usize> {
   c.iter().skip(2).position(|x| va.val(*x).is_none()).map(|u| u+2)
+}
+
+struct DeleteLine<'a, W>(&'a mut W, u64, bool);
+
+impl<'a, W: Write> DeleteLine<'a, W> {
+  fn with(lrat: &'a mut W, step: u64,
+    f: impl FnOnce(&mut DeleteLine<'a, W>) -> io::Result<()>
+  ) -> io::Result<()> {
+    let mut l = DeleteLine(lrat, step, false);
+    f(&mut l)?;
+    if l.2 { write!(l.0, " 0\n")? }
+    Ok(())
+  }
+
+  fn delete(&mut self, i: u64) -> io::Result<()> {
+    if mem::replace(&mut self.2, true) {
+      write!(self.0, " {}", i)
+    } else {
+      write!(self.0, "{} d {}", self.1, i)
+    }
+  }
 }
 
 fn trim(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut impl Write) -> io::Result<()> {
@@ -493,23 +519,39 @@ fn trim(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut impl Write) -> io::Result<()
     cnf.iter().map(|c| (PermClauseRef(c), (k += 1, k).1)).collect();
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
   let mut bp = ElabStepParser::new(Bin, temp)?.peekable();
-  let mut orig = HashMap::<u64, usize>::new();
+  let origs = k;
+  let mut used_origs = vec![0u8; origs as usize];
+
+  while let Some(ElabStep::Orig(_, _)) = bp.peek() {
+    if let Some(ElabStep::Orig(i, ls)) = bp.next() {
+      // eprintln!("-> Orig{:?}", (&i, &ls));
+      let j = *cnf.get(&PermClauseRef(&ls)).unwrap_or_else( // Find position of clause in original problem
+        || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls));
+      let r = &mut used_origs[j as usize - 1];
+      *r = r.saturating_add(1);
+      assert!(m.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
+      // eprintln!("{} -> {}", i, j);
+      if ls.is_empty() {
+        write!(lrat, "{} 0 {} 0\n", k+1, j)?;
+        return Ok(())
+      }
+    } else {unreachable!()}
+  }
+
+  DeleteLine::with(lrat, k, |line| {
+    for (j, &b) in used_origs.iter().enumerate() {
+      if b == 0 { line.delete(j as u64 + 1)? }
+    }
+    Ok(())
+  })?;
+
   while let Some(s) = bp.next() {
     // eprintln!("-> {:?}", s);
 
     match s {
 
-      ElabStep::Orig(i, ls) => {
-        let j = *cnf.get(&PermClauseRef(&ls)).unwrap_or_else( // Find position of clause in original problem
-          || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls));
-        *orig.entry(j).or_default() += 1;
-        assert!(m.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
-        // eprintln!("{} -> {}", i, j);
-        if ls.is_empty() {
-          write!(lrat, "{} 0 {} 0\n", k+1, j)?;
-          return Ok(())
-        }
-      }
+      ElabStep::Orig(_, _) =>
+        panic!("Orig steps must come at the beginning of the temp file"),
 
       ElabStep::Add(i, ls, is) => {
         k += 1; // Get the next fresh ID
@@ -539,35 +581,28 @@ fn trim(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut impl Write) -> io::Result<()
         }
       }
 
-      ElabStep::Del(i) => {
-        let mut nonemp = false;
-        let mut delete = |i| {
+      ElabStep::Del(i) => DeleteLine::with(lrat, k, |line| {
+        let m = &mut m;
+        let used_origs = &mut used_origs;
+        let mut delete = move |i| -> io::Result<()> {
           let j = m.remove(&i).unwrap();
-          let should_del = match orig.entry(j) {
-            Entry::Occupied(mut e) => {
-              let mut refc = *e.get();
-              refc -= 1;
-              *e.get_mut() = refc;
-              refc == 0
-            }
-            _ => false
-          };
-          if should_del {
-            if mem::replace(&mut nonemp, true) {
-              write!(lrat, " {}", j)
-            } else {
-              write!(lrat, "{} d {}", k, j)
-            }
-          } else {Ok(())}
+          if match used_origs.get_mut(j as usize - 1) {
+            None => true,
+            Some(&mut u8::MAX) => false,
+            Some(refc) => { *refc -= 1; *refc == 0 }
+          } { line.delete(j)? }
+          Ok(())
         };
-        delete(i)?; // Remove ID mapping to free space
+
+        // Remove ID mapping to free space
+        delete(i)?;
         // agglomerate additional del steps into this block
         while let Some(&ElabStep::Del(i)) = bp.peek() {
           bp.next();
-          delete(i)?
+          delete(i)?;
         }
-        if nonemp { write!(lrat, " 0\n")? }
-      }
+        Ok(())
+      })?
     }
   }
 
@@ -623,19 +658,19 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Resul
   for c in cnf {
     k += 1;
     ctx.step = Some(k);
-    eprintln!("{}: {:?}", k, c);
+    // eprintln!("{}: {:?}", k, c);
     ctx.insert(k, true, c);
   }
 
   for (i, s) in lp {
     ctx.step = Some(i);
-    eprintln!("{:?}", s);
+    // eprintln!("{}: {:?}", i, s);
     match s {
 
       LRATStep::Add(ls, p) => {
         assert!(i > k, "out-of-order LRAT proofs not supported");
         k = i;
-        eprintln!("{}: {:?} {:?}", k, ls, p);
+        // eprintln!("{}: {:?} {:?}", k, ls, p);
         if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
           let (init, rest) = p.split_at(start);
           run_rat_step(&ls, &mut ctx, init, rest.split_first(), false);
