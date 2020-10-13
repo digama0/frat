@@ -120,6 +120,7 @@ impl<M, I> LRATParser<M, I> {
 	pub fn from(_: M, it: I) -> Self { LRATParser(it, PhantomData) }
 }
 
+#[derive(Debug)]
 pub enum LRATStep {
 	Add(Vec<i64>, Vec<i64>),
 	Del(Vec<i64>)
