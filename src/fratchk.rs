@@ -27,6 +27,7 @@ pub fn check_proof(mode: impl Mode, proof: File) -> io::Result<()> {
   let mut todos = HashMap::new();
   let mut bad = false;
   while let Some(s) = bp.next() {
+    // println!("{:?}", s);
     match s {
       Step::Orig(i, lits) => {
         orig += 1;

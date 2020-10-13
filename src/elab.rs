@@ -422,6 +422,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, temp: File) -> io::Result<()> 
         if full || ctx.marked(i) {  // If the original clause is marked
           ElabStep::Orig(i, ls).write(w).expect("Failed to write orig step");
         }
+        // else { eprintln!("delete {}", i); }
         ctx.remove(i);
       }
 
@@ -451,6 +452,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, temp: File) -> io::Result<()> 
           }
           ElabStep::Add(i, ls, steps).write(w).expect("Failed to write add step");
         }
+        // else { eprintln!("delete {}", i); }
       }
 
       Step::Reloc(mut relocs) => {
@@ -491,7 +493,7 @@ fn trim(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut impl Write) -> io::Result<()
     cnf.iter().map(|c| (PermClauseRef(c), (k += 1, k).1)).collect();
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
   let mut bp = ElabStepParser::new(Bin, temp)?.peekable();
-
+  let mut orig = HashMap::<u64, usize>::new();
   while let Some(s) = bp.next() {
     // eprintln!("-> {:?}", s);
 
@@ -500,6 +502,7 @@ fn trim(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut impl Write) -> io::Result<()
       ElabStep::Orig(i, ls) => {
         let j = *cnf.get(&PermClauseRef(&ls)).unwrap_or_else( // Find position of clause in original problem
           || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls));
+        *orig.entry(j).or_default() += 1;
         assert!(m.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
         // eprintln!("{} -> {}", i, j);
         if ls.is_empty() {
@@ -537,13 +540,33 @@ fn trim(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut impl Write) -> io::Result<()
       }
 
       ElabStep::Del(i) => {
-        write!(lrat, "{} d {}", k, m.remove(&i).unwrap())?; // Remove ID mapping to free space
+        let mut nonemp = false;
+        let mut delete = |i| {
+          let j = m.remove(&i).unwrap();
+          let should_del = match orig.entry(j) {
+            Entry::Occupied(mut e) => {
+              let mut refc = *e.get();
+              refc -= 1;
+              *e.get_mut() = refc;
+              refc == 0
+            }
+            _ => false
+          };
+          if should_del {
+            if mem::replace(&mut nonemp, true) {
+              write!(lrat, " {}", j)
+            } else {
+              write!(lrat, "{} d {}", k, j)
+            }
+          } else {Ok(())}
+        };
+        delete(i)?; // Remove ID mapping to free space
         // agglomerate additional del steps into this block
         while let Some(&ElabStep::Del(i)) = bp.peek() {
           bp.next();
-          write!(lrat, " {}", m.remove(&i).unwrap())?
+          delete(i)?
         }
-        write!(lrat, " 0\n")?;
+        if nonemp { write!(lrat, " 0\n")? }
       }
     }
   }
@@ -600,19 +623,19 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Resul
   for c in cnf {
     k += 1;
     ctx.step = Some(k);
-    // eprintln!("{}: {:?}", k, c);
+    eprintln!("{}: {:?}", k, c);
     ctx.insert(k, true, c);
   }
 
   for (i, s) in lp {
     ctx.step = Some(i);
-    // eprintln!("{:?}", s);
+    eprintln!("{:?}", s);
     match s {
 
       LRATStep::Add(ls, p) => {
         assert!(i > k, "out-of-order LRAT proofs not supported");
         k = i;
-        // eprintln!("{}: {:?} {:?}", k, ls, p);
+        eprintln!("{}: {:?} {:?}", k, ls, p);
         if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
           let (init, rest) = p.split_at(start);
           run_rat_step(&ls, &mut ctx, init, rest.split_first(), false);
@@ -643,7 +666,7 @@ fn refrat_pass(elab: File, w: &mut impl Write) -> io::Result<()> {
 
   let mut ctx: HashMap<u64, Vec<i64>> = HashMap::new();
   for s in ElabStepParser::new(Bin, elab)? {
-    // eprintln!("-> {:?}", s);
+    eprintln!("-> {:?}", s);
 
     match s {
 
