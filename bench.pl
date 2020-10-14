@@ -60,8 +60,12 @@ run(Strings, STAT) :-
 run_and_time(STRS, TIME, STAT) :- 
   atomic_list_concat(STRS, CMD),
   atomic_list_concat(["time -v ", CMD, " 2> temp"], TIME_CMD),
-  shell(TIME_CMD, STAT),
-  shell("cat temp", 0),
+  (
+    shell(TIME_CMD, STAT) ->
+    shell("cat temp", 0) 
+  ;
+    shell("cat temp", 0), false
+  ),
   read_item(read_time, "temp", TIME),
   delete_file("temp").
 
@@ -69,8 +73,12 @@ run_and_measure(Strings, TIME, PEAK_MEM, STAT) :-
   atomic_list_concat(Strings, CMD),
   format('Using command ~w\n', CMD),
   atomic_list_concat(["time -v ", CMD, " 2> temp"], TIME_CMD),
-  shell(TIME_CMD, STAT),
-  shell("cat temp", 0),
+  (
+    shell(TIME_CMD, STAT) ->
+    shell("cat temp", 0) 
+  ;
+    shell("cat temp", 0), false
+  ),
   read_item(read_time, "temp", TIME),
   read_item(read_peak_mem, "temp", PEAK_MEM),
   delete_file("temp").
