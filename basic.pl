@@ -68,3 +68,4 @@ cleanup :-
   delete_file_if_exists("test.lrat"),
   delete_file_if_exists("test.drat").
   
+write_term_punct(STRM, TERM) :- write_term(STRM, TERM, [fullstop(true), nl(true), quoted(true)]).
