@@ -109,6 +109,51 @@ all_eq_fail(LIST) :-
   length(LIST, NUM),
   format('% Bench failed, aborting ~w remaining measurements\n', NUM).
 
+bench(drat, NUM, CNF_NAME) :-
+  atomic_list_concat(['probs/', CNF_NAME, '.cnf'], CNF_FILE),
+  write("\n>>>>>>>>>>>>> Begin bench <<<<<<<<<<<<<\n\n"),
+  format("% Problem number : ~w\n", NUM),
+  format("% Problem name : ~w\n", CNF_NAME),
+  write("\n------- Running Cadical -------\n\n"),
+  (
+    (
+      shell_measure(["./cadical -t 20000 -q ", CNF_FILE, " test.drat"], DIMACS_DRAT_TIME, _, 20),
+      size_file("test.drat", DRAT_SIZE) 
+    ) ->
+    format("% DIMACS-to-DRAT time : ~w seconds\n", DIMACS_DRAT_TIME),
+    format("% DRAT file size : ~w bytes\n", DRAT_SIZE),
+    write("\n------- Elaborating DRAT to LRAT  -------\n\n"),
+    (
+      (
+        shell_measure(["./drat-trim ", CNF_FILE, " test.drat -L test.lrat"], DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM, 0),
+        size_file("test.lrat", DRAT_LRAT_SIZE)
+      ) ->
+      format('% DRAT-to-LRAT time : ~w seconds\n', DRAT_LRAT_TIME),
+      format('% DRAT-to-LRAT peak memory usage : ~w kb\n', DRAT_LRAT_PEAK_MEM),
+      format('% LRAT-from-DRAT file size : ~w bytes\n', DRAT_LRAT_SIZE),
+      write("\n------- Checking LRAT from DRAT -------\n\n"),
+      (
+        shell_measure(["./lrat-check ", CNF_FILE, " test.lrat"], DRAT_LRAT_CHK_C_TIME, _, 0) ->
+        format("% LRAT-from-DRAT check time (C) : ~w seconds\n", DRAT_LRAT_CHK_C_TIME)
+      ;
+        all_eq_fail([DRAT_LRAT_CHK_C_TIME])
+      )
+    ;
+      all_eq_fail([DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM, DRAT_LRAT_SIZE, DRAT_LRAT_CHK_C_TIME])
+    )
+  ;
+    all_eq_fail([DIMACS_DRAT_TIME, DRAT_SIZE, DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM, DRAT_LRAT_SIZE, DRAT_LRAT_CHK_C_TIME])
+  ),
+  open('log', append, STRM),
+  write(STRM, "\n% Begin bench\n\n"),
+  write_term_punct(STRM, num_dd_time(NUM, DIMACS_DRAT_TIME)),
+  write_term_punct(STRM, num_drat_size(NUM, DRAT_SIZE)),
+  write_term_punct(STRM, num_dl_time(NUM, DRAT_LRAT_TIME)),
+  write_term_punct(STRM, num_dl_mem(NUM, DRAT_LRAT_PEAK_MEM)),
+  write_term_punct(STRM, num_ld_size(NUM, DRAT_LRAT_SIZE)),
+  write_term_punct(STRM, num_ld_check_time(NUM, DRAT_LRAT_CHK_C_TIME)),
+  close(STRM).
+
 bench(frat, NUM, CNF_NAME) :-
   atomic_list_concat(['probs/', CNF_NAME, '.cnf'], CNF_FILE),
   write("\n>>>>>>>>>>>>> Begin bench <<<<<<<<<<<<<\n\n"),
@@ -169,6 +214,7 @@ bench(frat, NUM, CNF_NAME) :-
   write_term_punct(STRM, num_lf_check_time(NUM, FRAT_LRAT_CHK_C_TIME)),
   close(STRM).
 
+        
 parse_bench_id(ID, frat, NUM) :- atom_concat('f', NA, ID), atom_number(NA, NUM).
 parse_bench_id(ID, drat, NUM) :- atom_concat('d', NA, ID), atom_number(NA, NUM).
 
