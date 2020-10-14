@@ -8,6 +8,7 @@ test.drat
 test.frat
 test.frat.temp
 test.lrat
-*.log
+log
 result
-
+stdout.txt
+stderr.txt

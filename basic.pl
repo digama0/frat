@@ -61,6 +61,7 @@ trace_if_debug(OPTS) :-
 
 cleanup :- 
   delete_file_if_exists("temp"),
+  delete_file_if_exists("measure"),
   delete_file_if_exists("frat_stats"),
   delete_file_if_exists("test.frat"),
   delete_file_if_exists("test.frat.temp"),
