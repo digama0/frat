@@ -111,8 +111,9 @@ all_eq_fail(LIST) :-
 
 bench(frat, NUM, CNF_NAME) :-
   atomic_list_concat(['probs/', CNF_NAME, '.cnf'], CNF_FILE),
-  write("\n>>>>>>>>>> Begin bench with problem number = ~w, problem name = ~w <<<<<<<<<<\n\n", [NUM, CNF_NAME]),
-  format("\n>>>>>>>>>> Begin bench with problem number = ~w, problem name = ~w <<<<<<<<<<\n\n", [NUM, CNF_NAME]),
+  write("\n>>>>>>>>>>>>> Begin bench <<<<<<<<<<<<<\n\n"),
+  format("% Problem number : ~w\n", NUM),
+  format("% Problem name : ~w\n", CNF_NAME),
   write("\n------- Running Hackdical -------\n\n"),
   (
     (
@@ -157,14 +158,15 @@ bench(frat, NUM, CNF_NAME) :-
   ),
 
   open('log', append, STRM),
+  write(STRM, "\n% Begin bench\n\n"),
   write_term_punct(STRM, num_df_time(NUM, DIMACS_FRAT_TIME)),
   write_term_punct(STRM, num_frat_size(NUM, FRAT_SIZE)),
   write_term_punct(STRM, num_missing(NUM, MISSING)),
   write_term_punct(STRM, num_fl_time(NUM, FRAT_LRAT_TIME)),
   write_term_punct(STRM, num_fl_mem(NUM, FRAT_LRAT_PEAK_MEM)),
   write_term_punct(STRM, num_temp_size(NUM, TEMP_SIZE)),
-  write_term_punct(STRM, num_lfrat_size(NUM, FRAT_LRAT_SIZE)),
-  write_term_punct(STRM, num_lfc_time(NUM, FRAT_LRAT_CHK_C_TIME)),
+  write_term_punct(STRM, num_lf_size(NUM, FRAT_LRAT_SIZE)),
+  write_term_punct(STRM, num_lf_check_time(NUM, FRAT_LRAT_CHK_C_TIME)),
   close(STRM).
 
 parse_bench_id(ID, frat, NUM) :- atom_concat('f', NA, ID), atom_number(NA, NUM).
@@ -173,9 +175,8 @@ parse_bench_id(ID, drat, NUM) :- atom_concat('d', NA, ID), atom_number(NA, NUM).
 bench(NAMES, ID) :- 
   parse_bench_id(ID, MODE, NUM) ->
   cleanup,
-  format("\n>>>>>>>>>> Running bench with problem number = ~w, bench mode = ~w <<<<<<<<<<\n\n", [NUM, MODE]),
   nth1(NUM, NAMES, CNF_NAME),
-  bench_core(MODE, CNF_NAME)
+  bench(MODE, NUM, CNF_NAME)
 ;
   format("Invalid bench ID : ~w\n", [ID]).
 
