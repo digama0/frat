@@ -1,37 +1,26 @@
-# libraries
 import numpy as np
+import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
-import data as dt 
- 
-# set width of bar
-barWidth = 0.35
- 
-length = len(dt.raw_data) + 1
-time_data = dt.raw_data + [dt.avg]
 
-time_prob_names = [x[0] for x in time_data]
-dimacs_frats = [x[1][0] / 60 for x in time_data]
-frat_lrats = [x[1][1] / 60 for x in time_data]
-dimacs_drats = [x[1][3] / 60 for x in time_data]
-drat_lrats = [x[1][4] / 60 for x in time_data]
+frat = [3400.4300000000003, 3188.86, 2451.73, 33.129999999999995, 17.720000000000002, 769.98, 13980.24, 688.9399999999999, 700.37, 2680.17, 495.18, 353.8, 3354.71, 2695.69, 1564.54, 463.94, 4746.38, 119.07, 685.38, 17509.52, 2159.7, 5456.92, 3215.8100000000004, 1994.19, 3710.3199999999997, 2611.95, 512.39, 243.67000000000002, 388.33000000000004, 23350.79, 1756.8799999999999, 1191.78, 2235.16, 2196.59, 17037.36, 2901.27, 1412.6799999999998, 166.74, 1783.88, 481.25, 385.67999999999995, 1056.9, 6311.58, 2962.29, 2961.59, 148.21, 197.89000000000001, 1365.76, 2106.9, 2618.41, 639.74, 495.69, 540.58, 491.51, 18.09, 468.69, 456.48, 1692.4, 2084.62, 2869.04, 3028.63, 1924.15, 46.089999999999996, 2922.41, 164.89, 1827.75, 2945.16, 293.7, 738.4200000000001, 533.5600000000001, 482.28, 289.06, 302.05, 44.13, 1912.1299999999999, 200.73000000000002, 3890.26, 3515.2, 8270.29, 1368.73, 969.72, 861.63, 589.47, 53.73, 624.55, 8465.619999999999]
+drat = [3402.75, 1532.96, 2990.31, 31.07, 19.28, 1191.66, 3429.41, 275.96000000000004, 946.76, 6847.71, 1073.79, 706.81, 5873.98, 5467.379999999999, 2062.13, 1075.93, 5158.8, 229.95, 1762.49, 5481.92, 5420.2, 2239.97, 9104.15, 4753.38, 2046.1999999999998, 1311.3899999999999, 751.78, 330.87, 826.99, 3348.86, 1370.87, 4042.7799999999997, 4196.55, 3707.9800000000005, 6129.09, 7650.1900000000005, 1446.73, 130.09, 3476.3100000000004, 415.59, 1013.73, 3113.5200000000004, 24157.620000000003, 7414.48, 7528.91, 226.87, 367.54, 2958.09, 3328.54, 5881.32, 1356.23, 1013.91, 1157.6399999999999, 1027.32, 14.73, 1093.92, 1194.52, 4950.67, 5988.76, 3073.31, 3181.03, 3935.33, 48.059999999999995, 2277.62, 148.04, 3007.8900000000003, 5971.799999999999, 542.04, 1701.37, 1149.51, 1047.35, 553.01, 557.78, 52.25, 2590.73, 372.72, 6215.49, 5545.06, 3707.9700000000003, 2711.76, 323.99, 354.04999999999995, 672.5400000000001, 176.85999999999999, 274.06, 9200.16]
 
-r = np.arange(length)
-r0 = np.concatenate([r[:-1], [r[-1] + 1]])
-r1 = [x - (barWidth / 2) for x in r0] # np.arange(len(prob_names))]
-r2 = [x + barWidth for x in r1]
-  
-plt.bar(r1, dimacs_drats, color='#1464F4', width=barWidth, edgecolor='white', label='DIMACS to DRAT (unmodified CaDiCaL)')
-plt.bar(r1, drat_lrats, bottom=dimacs_drats, color='#60AFFE', edgecolor='white', width=barWidth, label='DRAT to LRAT (DRAT-trim)')
-plt.bar(r2, dimacs_frats, color='#1DA237', width=barWidth, edgecolor='white', label='DIMACS to FRAT (modified CaDiCaL)')
-plt.bar(r2, frat_lrats, bottom=dimacs_frats, color='#7BCC70', edgecolor='white', width=barWidth, label='FRAT to LRAT (our elaborator)')
- 
-plt.tick_params(axis="x", labelsize=8)
+frat_min = [x / 60 for x in frat]
+drat_min = [x / 60 for x in drat]
 
-# Add xticks on the middle of the group bars
-plt.xlabel('Problems', fontweight='bold')
-plt.ylabel('Time (minutes)', fontweight='bold')
-plt.xticks(r0, time_prob_names)
+frat_x = np.sort(frat_min)
+n = frat_x.size
+frat_y = np.arange(1, n+1) 
 
-# Create legend & Show graphic
-plt.legend()
-plt.show()
+drat_x = np.sort(drat_min)
+drat_y = np.arange(1, n+1) 
+
+# plt.scatter(x=frat_x, y=frat_y, color='green', label="FRAT")
+# plt.scatter(x=drat_x, y=drat_y, color='blue', label="DRAT")
+plt.plot(frat_x, frat_y, '-x', color='green', label="FRAT", markersize=4)
+plt.plot(drat_x, drat_y, '-x', color='blue', label="DRAT", markersize=4)
+plt.xlabel('Time (minutes)', fontsize=12)
+plt.ylabel('Number of instances solved', fontsize=12)
+plt.legend(loc='lower right')
+plt.savefig('time.eps', format='eps')

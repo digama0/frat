@@ -1,41 +1,21 @@
-# libraries
 import numpy as np
+import pandas as pd
+import seaborn as sns
 import matplotlib.pyplot as plt
-import data as dt
- 
-# set width of bar
-barWidth = 0.35
 
-def get_drat_peak_mem(x):
-  return x[1][5]
+frat = [0.142648, 0.018396, 0.025588, 0.033216, 0.03214, 0.039216, 0.18884, 0.03958, 0.034464, 0.029772, 0.059956, 0.610568, 0.18836, 0.040672, 0.20706, 0.047248, 0.0479, 0.90724, 0.053308, 0.055132, 0.043328, 0.185756, 0.078804, 0.173852, 0.045968, 0.023032, 0.038932, 0.055676, 0.044824, 0.052716, 0.038272, 0.150164, 0.047888, 0.052592, 0.045956, 0.1063, 0.057208, 0.326308, 0.056284, 1.100948, 0.121208, 0.566284, 0.051096, 0.05804, 0.457924, 0.238216, 2.7125, 0.524584, 0.322812, 0.07534, 0.135232, 0.615292, 0.086464, 0.343348, 0.06656, 0.457348, 0.098328, 0.752196, 1.511516, 1.433, 0.298096, 1.872088, 0.238, 0.107876, 0.137636, 0.277304, 0.082696, 0.068148, 3.595896, 0.202344, 0.090812, 1.297692, 0.697036, 0.172148, 0.113, 0.089676, 0.078868, 3.010192, 0.840712, 0.0618, 0.13824, 0.148072, 0.477296, 0.088092, 0.254668, 0.129644]
+drat = [0.13092, 0.109304, 0.127564, 0.18244, 0.160732, 0.491876, 0.254924, 0.123008, 0.736404, 0.359512, 1.58786, 0.798872, 0.43256, 1.52966, 0.602948, 0.520228, 0.58906, 1.401228, 0.66486, 0.761396, 0.720828, 0.55036, 1.962852, 0.961016, 1.813384, 1.41642, 1.105724, 1.21954, 1.39672, 1.194684, 1.270992, 2.46266, 0.858792, 1.196524, 1.588004, 1.147512, 1.826132, 2.417808, 1.799448, 0.67758, 1.311192, 2.350824, 1.374472, 1.190784, 3.787004, 4.518488, 2.674908, 8.666116, 3.854756, 1.631572, 5.391492, 1.298568, 3.348684, 3.469628, 2.330216, 2.461316, 2.168532, 1.530404, 6.429576, 1.741836, 4.85792, 11.371892, 9.499304, 2.671284, 3.487588, 2.703952, 2.863072, 2.709932, 3.011976, 5.952412, 2.425996, 2.241424, 1.08338, 1.626968, 3.007944, 2.119596, 2.9995, 21.545744, 1.20142, 4.529796, 3.567712, 3.624304, 3.305972, 4.452216, 6.057448, 9.815944]
 
-print(dt.avg)
+frat_x = np.sort(frat)
+n = frat_x.size
+frat_y = np.arange(1, n+1) 
 
-length = len(dt.raw_data) + 1
+drat_x = np.sort(drat)
+drat_y = np.arange(1, n+1) 
 
-mem_data = sorted(dt.raw_data, key=get_drat_peak_mem) + [dt.avg]
-mem_prob_names = [x[0] for x in mem_data]
-frat_peak_mems = [x[1][2] / 1000 for x in mem_data]
-drat_peak_mems = [x[1][5] / 1000 for x in mem_data]
-
-r = np.arange(length)
-r0 = np.concatenate([r[:-1], [r[-1] + 1]])
-r1 = [x - (barWidth / 2) for x in r0] # np.arange(len(prob_names))]
-r2 = [x + barWidth for x in r1]
-  
-plt.bar(r1, drat_peak_mems, color='#60AFFE', width=barWidth, edgecolor='white', label='DRAT')
-plt.bar(r2, frat_peak_mems, color='#7BCC70', width=barWidth, edgecolor='white', label='FRAT')
- 
-plt.tick_params(axis="x", labelsize=8)
-
-# Add xticks on the middle of the group bars
-plt.xlabel('Problems', fontweight='bold')
-
-# plt.ylabel('Time (seconds)', fontweight='bold')
-plt.ylabel('Peak memory usage (MB)', fontweight='bold')
-
-plt.xticks(r0, mem_prob_names)
-
-# Create legend & Show graphic
-plt.legend()
-plt.show()
+plt.plot(frat_x, frat_y, '-x', color='green', label="FRAT", markersize=4)
+plt.plot(drat_x, drat_y, '-x', color='blue',  label="DRAT", markersize=4)
+plt.xlabel('Peak memory usage (GB) ', fontsize=12)
+plt.ylabel('Number of instances solved', fontsize=12)
+plt.legend(loc='lower right')
+plt.savefig('mem.eps', format='eps')

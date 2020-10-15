@@ -35,6 +35,14 @@ num_frat_vals(NUM, [DFT, FSZ, MS, FLT, FLM, TSZ, LSZ, LCT]) :-
   num_lf_size(NUM, LSZ),
   num_lf_check_time(NUM, LCT).
 
+num_drat_vals(NUM, [DDT, DSZ, DLT, DLM, LSZ, LCT]) :-
+  num_dd_time(NUM, DDT),
+  num_drat_size(NUM, DSZ),
+  num_dl_time(NUM, DLT),
+  num_dl_mem(NUM, DLM),
+  num_ld_size(NUM, LSZ),
+  num_ld_check_time(NUM, LCT).
+
 frat_passed(NUM) :-
   item_not_fail(num_df_time(NUM)),
   item_not_fail(num_frat_size(NUM)),
@@ -96,36 +104,16 @@ esc_us(IN, OUT) :-
   atom_codes(OUT, CODES_OUT). 
 
 print_row(NUM) :-
-  num_abv(NUM, ABV),
-  num_df_time(NUM, DFT),
-  num_fl_time(NUM, FLT),
-  num_fl_mem(NUM, FLM),
-  num_dd_time(NUM, DDT),
-  num_dl_time(NUM, DLT),
-  num_dl_mem(NUM, DLM),
-  DATA = [DFT, FLT, FLM, DDT, DLT, DLM],
-  format('(\"~w\", ~w),\n', [ABV, DATA]).
-
-% print_row(NUM) :-
-%   num_abv(NUM, ABV),
-%   num_df_time(NUM, DFT),
-%   num_fl_time(NUM, FLT),
-%   num_fl_mem(NUM, FLM),
-%   FLM_MB is div(FLM, 1000),
-%   num_dd_time(NUM, DDT),
-%   num_dl_time(NUM, DLT),
-%   num_dl_mem(NUM, DLM),
-%   DLM_MB is div(DLM, 1000),
-%   TOTAL_RATIO is ((DFT + FLT) / (DDT + DLT)),
-%   ELAB_RATIO is (FLT / DLT),
-%   MEM_RATIO is (FLM / DLM),
-%   format(
-%     "\\textt{~w} & $~2f$ & $~2f$ & $~w$ & $~2f$ & $~2f$ & $~w$ & $~2f$ & $~2f$ & $~3f$ \\\\\n", 
-%     [ABV, DFT, FLT, FLM_MB, DDT, DLT, DLM_MB, TOTAL_RATIO, ELAB_RATIO, MEM_RATIO]
-%   ).
-
-
-
+  num_name(NUM, NAME),
+  atom_concat(NAME, '.cnf', FILE),
+  num_frat_vals(NUM, FRAT_VALS),
+  num_drat_vals(NUM, DRAT_VALS),
+  append(FRAT_VALS, DRAT_VALS, VALS),
+  atomic_list_concat([FILE | VALS], ',', ROW),
+  write(ROW), nl.
   
-
-
+cp_to_arch(NUM) :-
+  num_name(NUM, NAME),
+  atomic_list_concat(["cp probs/", NAME, ".cnf arch/", NAME, ".cnf"], CMD),
+  shell(CMD).
+  
