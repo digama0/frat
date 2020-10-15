@@ -53,6 +53,26 @@ num_dl_mem(2,2350824).
 num_ld_size(2,278265719).
 num_ld_check_time(2,8.2).
 
+% FRAT bench, problem 3
+
+num_df_time(3,354.73).
+num_frat_size(3,970236195).
+num_missing(3,fail("thread 'main' panicked at 'bad LRAT proof', src/fratchk.rs:61:37")).
+num_fl_time(3,fail("")).
+num_fl_mem(3,fail("")).
+num_temp_size(3,fail("")).
+num_lf_size(3,fail("")).
+num_lf_check_time(3,fail("")).
+
+% DRAT bench, problem 3 (6s133-sc2014)
+
+num_dd_time(3,226.01).
+num_drat_size(3,286996693).
+num_dl_time(3,141.41).
+num_dl_mem(3,586740).
+num_ld_size(3,343413973).
+num_ld_check_time(3,9.59).
+
 % FRAT bench, problem 4 (6s139-sc2013)
 
 num_df_time(4,1483.36).
@@ -393,6 +413,26 @@ num_dl_mem(20,1190784).
 num_ld_size(20,1159789126).
 num_ld_check_time(20,34.24).
 
+% FRAT bench, problem 21
+
+num_df_time(21,378.36).
+num_frat_size(21,845324727).
+num_missing(21,58.5).
+num_fl_time(21,fail("thread 'main' panicked at 'Clause already watched', src/elab.rs:88:3")).
+num_fl_mem(21,fail("")).
+num_temp_size(21,fail("")).
+num_lf_size(21,fail("")).
+num_lf_check_time(21,fail("")).
+
+% DRAT bench, problem 21
+
+num_dd_time(21,321.22).
+num_drat_size(21,433642329).
+num_dl_time(21,163.25).
+num_dl_mem(21,823740).
+num_ld_size(21,209400040).
+num_ld_check_time(21,6.43).
+
 % FRAT bench, problem 22 (SAT_dat.k85-sc2013)
 
 num_df_time(22,2236.56).
@@ -613,6 +653,26 @@ num_dl_mem(32,1530404).
 num_ld_size(32,491730061).
 num_ld_check_time(32,14.7).
 
+% FRAT bench, problem 33 (atco_enc1_opt2_20_12-sc2014)
+
+num_df_time(33,2199.4).
+num_frat_size(33,1277479630).
+num_missing(33,fail("thread 'main' panicked at 'bad LRAT proof', src/fratchk.rs:61:37")).
+num_fl_time(33,fail("")).
+num_fl_mem(33,fail("")).
+num_temp_size(33,fail("")).
+num_lf_size(33,fail("")).
+num_lf_check_time(33,fail("")).
+
+% DRAT bench, problem 33 (atco_enc1_opt2_20_12-sc2014)
+
+num_dd_time(33,2019.76).
+num_drat_size(33,492590254).
+num_dl_time(33,3387.56).
+num_dl_mem(33,1700308).
+num_ld_size(33,1387256107).
+num_ld_check_time(33,41.18).
+
 % FRAT bench, problem 34 (atco_enc3_opt2_10_12-sc2014)
 
 num_df_time(34,1271.6).
@@ -692,6 +752,46 @@ num_dl_time(37,2203.59).
 num_dl_mem(37,9499304).
 num_ld_size(37,8267472952).
 num_ld_check_time(37,240.26).
+
+% FRAT bench, problem 38
+
+num_df_time(38,8566.23).
+num_frat_size(38,63211008395).
+num_missing(38,75.4).
+num_fl_time(38,21288.9).
+num_fl_mem(38,2867720).
+num_temp_size(38,12192774175).
+num_lf_size(38,25294768446).
+num_lf_check_time(38,681.68).
+
+% DRAT bench, problem 38 (blocks-blocks-36-0.120-NOTKNOWN-sc2011)
+
+num_dd_time(38,7948.66).
+num_drat_size(38,42705695442).
+num_dl_time(38,fail("Command terminated by signal 9 (32GB ram exhausted)")).
+num_dl_mem(38,fail("")).
+num_ld_size(38,fail("")).
+num_ld_check_time(38,fail("")).
+
+% FRAT bench, problem 39 (blocks-blocks-37-1.130-NOTKNOWN-sc2011)
+
+num_df_time(39,4332.31).
+num_frat_size(39,35722307705).
+num_missing(39,77.9).
+num_fl_time(39,12705.05).
+num_fl_mem(39,3010192).
+num_temp_size(39,3196683696).
+num_lf_size(39,6789379661).
+num_lf_check_time(39,183.76).
+
+% DRAT bench, problem 39 (blocks-blocks-37-1.130-NOTKNOWN-sc2011)
+
+num_dd_time(39,3536.68).
+num_drat_size(39,24280916746).
+num_dl_time(39,2592.41).
+num_dl_mem(39,21545744).
+num_ld_size(39,9290406699).
+num_ld_check_time(39,282.26).
 
 % FRAT bench, problem 40 (bob12s06-sc2013)
 
@@ -832,6 +932,26 @@ num_dl_time(46,2263.53).
 num_dl_mem(46,2330216).
 num_ld_size(46,1753174097).
 num_ld_check_time(46,55.36).
+
+% FRAT bench, problem 47 (cruxmiter29seed9)
+
+num_df_time(47,5484.29).
+num_frat_size(47,6514191902).
+num_missing(47,0.2).
+num_fl_time(47,827.29).
+num_fl_mem(47,129644).
+num_temp_size(47,3561570585).
+num_lf_size(47,7542477024).
+num_lf_check_time(47,238.79).
+
+% DRAT bench, problem 47 (cruxmiter29seed9)
+
+num_dd_time(47,5282.29).
+num_drat_size(47,2608238367).
+num_dl_time(47,18875.33).
+num_dl_mem(47,9815944).
+num_ld_size(47,8470187567).
+num_ld_check_time(47,256.9).
 
 % FRAT bench, problem 48 (ctl_4291_567_2_unsat-sc2013)
 
@@ -1053,6 +1173,46 @@ num_dl_mem(58,1396720).
 num_ld_size(58,1536026189).
 num_ld_check_time(58,45.63).
 
+% FRAT bench, problem 59 (ex051_9-sc2018)
+
+num_df_time(59,2472.52).
+num_frat_size(59,1961374628).
+num_missing(59,fail("thread 'main' panicked at 'bad LRAT proof', src/fratchk.rs:61:37")).
+num_fl_time(59,fail("")).
+num_fl_mem(59,fail("")).
+num_temp_size(59,fail("")).
+num_lf_size(59,fail("")).
+num_lf_check_time(59,fail("")).
+
+% DRAT bench, problem 59 (ex051_9-sc2018)
+
+num_dd_time(59,2435.94).
+num_drat_size(59,958018419).
+num_dl_time(59,597.53).
+num_dl_mem(59,1609060).
+num_ld_size(59,452218827).
+num_ld_check_time(59,13.57).
+
+% FRAT bench, problem 60 (f10nidw-sc2012)
+
+num_df_time(60,464.58).
+num_frat_size(60,790069454).
+num_missing(60,27.5).
+num_fl_time(60,fail("thread 'main' panicked at 'at Some(5145044): Clause 4952654 to be accessed does not exist', src/elab.rs:174:10")).
+num_fl_mem(60,fail("")).
+num_temp_size(60,fail("")).
+num_lf_size(60,fail("")).
+num_lf_check_time(60,fail("")).
+
+% DRAT bench, problem 60 (f10nidw-sc2012)
+
+num_dd_time(60,356.54).
+num_drat_size(60,479118011).
+num_dl_time(60,80.45).
+num_dl_mem(60,877560).
+num_ld_size(60,122217279).
+num_ld_check_time(60,4.58).
+
 % FRAT bench, problem 61 (f6nidw-sc2012)
 
 num_df_time(61,13.6).
@@ -1173,6 +1333,26 @@ num_dl_mem(66,3469628).
 num_ld_size(66,569680607).
 num_ld_check_time(66,15.32).
 
+% FRAT bench, problem 67 (hwmcc15deep-6s516r-k18-sc2017)
+
+num_df_time(67,1260.7).
+num_frat_size(67,8070441210).
+num_missing(67,fail("thread 'main' panicked at 'bad LRAT proof', src/fratchk.rs:61:37")).
+num_fl_time(67,fail("")).
+num_fl_mem(67,fail("")).
+num_temp_size(67,fail("")).
+num_lf_size(67,fail("")).
+num_lf_check_time(67,fail("")).
+
+% DRAT bench, problem 67 (hwmcc15deep-6s516r-k18-sc2017)
+
+num_dd_time(67,1133.04).
+num_drat_size(67,4568971017).
+num_dl_time(67,1796.37).
+num_dl_mem(67,6561056).
+num_ld_size(67,4926013173).
+num_ld_check_time(67,127.41).
+
 % FRAT bench, problem 68 (hwmcc15deep-oski15a10b10s-k22-sc2017)
 
 num_df_time(68,2499.05).
@@ -1252,6 +1432,26 @@ num_dl_time(71,873.59).
 num_dl_mem(71,8666116).
 num_ld_size(71,4955881163).
 num_ld_check_time(71,132.5).
+
+% FRAT bench, problem 72
+
+num_df_time(72,3035.23).
+num_frat_size(72,8497246412).  
+num_missing(72,0.1).
+num_fl_time(72,fail("Command terminated by signal 11")).
+num_fl_mem(72,fail("")).
+num_temp_size(72,fail("")).  
+num_lf_size(72,fail("")).
+num_lf_check_time(72,fail("")).
+
+% DRAT bench, problem 72 (mod2c-3cage-unsat-10-3.sat05-2568.reshuffled-07-sc2007)
+
+num_dd_time(72,2928.37).
+num_drat_size(72,4705884783).
+num_dl_time(72,11304.7).
+num_dl_mem(72,16788356).
+num_ld_size(72,10336173905).
+num_ld_check_time(72,fail("Command terminated by signal 11")).
 
 % FRAT bench, problem 73 (pb_300_10_lb_08-sc2014)
 
@@ -1413,6 +1613,26 @@ num_dl_mem(80,761396).
 num_ld_size(80,604637972).
 num_ld_check_time(80,18.04).
 
+% FRAT bench, problem 81 (size_4_4_4_i4295_r8)
+
+num_df_time(81,197.29).
+num_frat_size(81,408411443).
+num_missing(81,fail("thread 'main' panicked at 'bad LRAT proof', src/fratchk.rs:61:37")).
+num_fl_time(81,fail("")).
+num_fl_mem(81,fail("")).
+num_temp_size(81,fail("")).
+num_lf_size(81,fail("")).
+num_lf_check_time(81,fail("")).
+
+% DRAT bench, problem 81 (size_4_4_4_i4295_r8)
+
+num_dd_time(81,205.63).
+num_drat_size(81,147088238).
+num_dl_time(81,307.2).
+num_dl_mem(81,652264).
+num_ld_size(81,526206170).
+num_ld_check_time(81,16.2).
+
 % FRAT bench, problem 82 (size_4_4_4_i4473_r8)
 
 num_df_time(82,258.26).
@@ -1432,6 +1652,26 @@ num_dl_time(82,323.68).
 num_dl_mem(82,720828).
 num_ld_size(82,542739191).
 num_ld_check_time(82,16.11).
+
+% FRAT bench, problem 83 (size_4_4_4_i4828_r8)
+
+num_df_time(83,381.76).
+num_frat_size(83,632882120).
+num_missing(83,fail("thread 'main' panicked at 'bad LRAT proof', src/fratchk.rs:61:37")).
+num_fl_time(83,fail("")).
+num_fl_mem(83,fail("")).
+num_temp_size(83,fail("")).
+num_lf_size(83,fail("")).
+num_lf_check_time(83,fail("")).
+
+% DRAT bench, problem 83 (size_4_4_4_i4828_r8)
+
+num_dd_time(83,365.42).
+num_drat_size(83,224977007).
+num_dl_time(83,646.9).
+num_dl_mem(83,1004572).
+num_ld_size(83,867749038).
+num_ld_check_time(83,27.05).
 
 % FRAT bench, problem 84 (slp-synthesis-aes-bottom13-sc2011)
 
@@ -1492,6 +1732,26 @@ num_dl_time(86,189.56).
 num_dl_mem(86,589060).
 num_ld_size(86,477788483).
 num_ld_check_time(86,14.52).
+
+% FRAT bench, problem 87 (snw_13_8_pre-sc2016)
+
+num_df_time(87,1943.79).
+num_frat_size(87,870563416).
+num_missing(87,fail("thread 'main' panicked at 'bad LRAT proof', src/fratchk.rs:61:37")).
+num_fl_time(87,fail("")).
+num_fl_mem(87,fail("")).
+num_temp_size(87,fail("")).
+num_lf_size(87,fail("")).
+num_lf_check_time(87,fail("")).
+
+% DRAT bench, problem 87
+
+num_dd_time(87,1829.28).
+num_drat_size(87,357345085).
+num_dl_time(87,2296.18).
+num_dl_mem(87,1249840).
+num_ld_size(87,874501459).
+num_ld_check_time(87,27.87).
 
 % FRAT bench, problem 88 (snw_16_8_nopre-sc2016)
 
@@ -1672,3 +1932,23 @@ num_dl_time(96,136.95).
 num_dl_mem(96,1587860).
 num_ld_size(96,2425281073).
 num_ld_check_time(96,63.49).
+
+% FRAT bench, problem 97 (uniqinv47prop-sc2018)
+
+num_df_time(97,7921.07).
+num_frat_size(97,20311166275).
+num_missing(97,8.5).
+num_fl_time(97,544.55).
+num_fl_mem(97,254668).
+num_temp_size(97,1293391877).
+num_lf_size(97,2646351626).
+num_lf_check_time(97,79.51).
+
+% DRAT bench, problem 97 (uniqinv47prop-sc2018)
+
+num_dd_time(97,6361.41).
+num_drat_size(97,3860170590).
+num_dl_time(97,2838.75).
+num_dl_mem(97,6057448).
+num_ld_size(97,1837240145).
+num_ld_check_time(97,54.26).

@@ -68,4 +68,8 @@ cleanup :-
   delete_file_if_exists("test.lrat"),
   delete_file_if_exists("test.drat").
   
+write_term_punct(TERM) :- write_term(TERM, [fullstop(true), nl(true), quoted(true)]).
 write_term_punct(STRM, TERM) :- write_term(STRM, TERM, [fullstop(true), nl(true), quoted(true)]).
+
+within(FST, LST, FST) :- FST =< LST.
+within(FST, LST, NUM) :- FST < LST, num_suc(FST, SND), within(SND, LST, NUM).
