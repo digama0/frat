@@ -204,7 +204,7 @@ mv_sat(FILE) :-
 
 main(OPTS) :- 
   path_files("test", FILES), !,
-  maplist_cut(path_stem('cnf'), FILES, NAMES),
+  cmap(path_stem('cnf'), FILES, NAMES),
   sort(NAMES, SORTED), 
   write_list(SORTED),
   open('probs.txt', write, STRM), 
