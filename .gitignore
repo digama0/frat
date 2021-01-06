@@ -13,3 +13,4 @@ result
 stdout.txt
 stderr.txt
 charts/__pycache__
+fuzz/

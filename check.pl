@@ -140,17 +140,17 @@ rup(CTX, VAL, HINTS) :-
 
 neg(NUM, NEG) :- NEG is -NUM.
 
-noteworthy(3116569).
-noteworthy(ID) :- 
-  REM is mod(ID, 10000), 
-  REM = 0.
+target(_).
+% target(ID) :- 
+%   REM is mod(ID, 10000), 
+%   REM = 0.
 
 report_add(ID) :-
-  noteworthy(ID) -> 
+  target(ID) -> 
   format("Adding ID = ~w\n", ID) ; true.
 
 report_del(ID) :-
-  noteworthy(ID) -> 
+  target(ID) -> 
   format("Deleting ID = ~w\n", ID) ; true.
 
 build_val(LITS, VAL) :- 
@@ -158,27 +158,29 @@ build_val(LITS, VAL) :-
   empty_assoc(EMP), 
   foldl(add_unit, NEGS, EMP, VAL).
 
-loop(CTX, _, a(ID, [], HINTS)) :- !, 
-  report_add(ID),
+loop(CTX, _, a(_, [], HINTS)) :- !, 
   empty_assoc(EMP),
   rup(CTX, EMP, HINTS).
 
 loop(CTX, STM, d(ID, LITS)) :- 
-  report_del(ID),
   del_assoc(ID, CTX, CLA, TEMP), 
   is_perm(LITS, CLA), !, 
   loop(TEMP, STM).
+
 loop(CTX, STM, a(ID, LITS, none)) :-
-  report_add(ID),
-  % build_val(LITS, VAL), !,
-  % assoc_to_values(CTX, CLAS), !, 
-  % rup_weak(VAL, CLAS), !, 
+  (
+    target(ID) -> 
+    build_val(LITS, VAL), !,
+    assoc_to_values(CTX, CLAS), !, 
+    rup_weak(VAL, CLAS), !
+  ;
+    true
+  ), !, 
   put_assoc(ID, CTX, LITS, NEW_CTX), !,
   loop(NEW_CTX, STM).
 loop(CTX, STM, a(ID, LITS, HINTS)) :- 
-  report_add(ID),
   (
-    (3280000 < ID, ID < 3281000) -> 
+    target(ID) -> 
     build_val(LITS, VAL), 
     rup(CTX, VAL, HINTS) 
   ;
@@ -187,11 +189,7 @@ loop(CTX, STM, a(ID, LITS, HINTS)) :-
   put_assoc(ID, CTX, LITS, NEW_CTX), !,
   loop(NEW_CTX, STM).
 loop(PROB, STM, o(ID, LITS)) :- 
-  % format("Clause to add = ~w\n", [LITS]),
-  report_add(ID),
-  % format("Retrieving ID = ~w...\n", [ID]),
   get_assoc(ID, PROB, CLA), 
-  % format("Retrieved clause from context = ~w\n", [CLA]),
   is_perm(CLA, LITS), !, 
   loop(PROB, STM).
 loop(PROB, STM, t(_)) :- !,
@@ -202,7 +200,7 @@ loop(_, _, STEP) :-
 
 loop(PROB, STM) :- 
   stm_step(STM, STEP), !, 
-  % format("Checking step = ~w\n", STEP), !,
+  format("Checking step = ~w\n", STEP), !,
   loop(PROB, STM, STEP).
 
 main([DIMACS, FRAT]) :- !,
