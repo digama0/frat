@@ -51,7 +51,6 @@ get_nat(STM, NUM) :-
     get_nat(STM, TEMP),  
     NUM is (TEMP * 128) + DIFF
   ).
-  
 
 get_int(STM, NUM) :-  
   get_nat(STM, UNS), 
@@ -119,24 +118,32 @@ cla_val_unit([LIT | CLA], VAL, UNIT) :-
   LIT = UNIT, 
   cmap(falsified(VAL), CLA). 
   
-rup_weak(VAL, CLAS) :- 
+rup_no_hint(VAL, CLAS) :- 
   pluck(CLAS, CLA, REST), 
   cla_val_unit(CLA, VAL, UNIT), !, 
   (
     falsified(VAL, UNIT) -> true ;
     add_unit(UNIT, VAL, NEW_VAL), 
-    rup_weak(NEW_VAL, REST)
+    rup_no_hint(NEW_VAL, REST)
   ).
 
-rup(CTX, VAL, HINTS) :- 
+rup_hinted(CTX, VAL, HINTS) :- 
   pluck(HINTS, HINT, REST), 
   get_assoc(HINT, CTX, CLA), 
   cla_val_unit(CLA, VAL, UNIT), !, 
   (
     falsified(VAL, UNIT) -> true ;
     add_unit(UNIT, VAL, NEW_VAL), 
-    rup(CTX, NEW_VAL, REST)
+    rup_hinted(CTX, NEW_VAL, REST)
   ).
+
+rup(CTX, LITS, none) :- !, 
+  build_val(LITS, VAL), !,
+  assoc_to_values(CTX, CLAS), !, 
+  rup_no_hint(VAL, CLAS), !.
+rup(CTX, LITS, HINTS) :- 
+  build_val(LITS, VAL), !,
+  rup_hinted(CTX, VAL, HINTS).
 
 neg(NUM, NEG) :- NEG is -NUM.
 
@@ -158,34 +165,17 @@ build_val(LITS, VAL) :-
   empty_assoc(EMP), 
   foldl(add_unit, NEGS, EMP, VAL).
 
-loop(CTX, _, a(_, [], HINTS)) :- !, 
-  empty_assoc(EMP),
-  rup(CTX, EMP, HINTS).
+loop(CTX, _, a(ID, [], HINTS)) :- !, 
+  target(ID) -> rup(CTX, [], HINTS) ; true.
+  % rup(CTX, [], HINTS). 
 
 loop(CTX, STM, d(ID, LITS)) :- 
   del_assoc(ID, CTX, CLA, TEMP), 
   is_perm(LITS, CLA), !, 
   loop(TEMP, STM).
 
-loop(CTX, STM, a(ID, LITS, none)) :-
-  (
-    target(ID) -> 
-    build_val(LITS, VAL), !,
-    assoc_to_values(CTX, CLAS), !, 
-    rup_weak(VAL, CLAS), !
-  ;
-    true
-  ), !, 
-  put_assoc(ID, CTX, LITS, NEW_CTX), !,
-  loop(NEW_CTX, STM).
 loop(CTX, STM, a(ID, LITS, HINTS)) :- 
-  (
-    target(ID) -> 
-    build_val(LITS, VAL), 
-    rup(CTX, VAL, HINTS) 
-  ;
-    true
-  ), !,
+  (target(ID) -> rup(CTX, LITS, HINTS) ; true), !,
   put_assoc(ID, CTX, LITS, NEW_CTX), !,
   loop(NEW_CTX, STM).
 loop(PROB, STM, o(ID, LITS)) :- 
