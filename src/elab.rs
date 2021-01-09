@@ -512,7 +512,7 @@ impl<'a, W: Write> DeleteLine<'a, W> {
   }
 }
 
-fn trim(cnf: &Vec<Vec<i64>>, temp: File, lrat: &mut impl Write) -> io::Result<()> {
+fn trim(cnf: &[Vec<i64>], temp: File, lrat: &mut impl Write) -> io::Result<()> {
 
   let mut k = 0 as u64; // Counter for the last used ID
   let cnf: HashMap<PermClauseRef, u64> = // original CNF
@@ -739,5 +739,6 @@ pub fn refrat(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   let elab_path = args.next().expect("missing elab file");
   let frat_path = args.next().expect("missing frat file");
   let w = &mut BufWriter::new(File::create(&frat_path)?);
-  refrat_pass(File::open(elab_path)?, w)
+  refrat_pass(File::open(elab_path)?, w)?;
+  w.flush()
 }
