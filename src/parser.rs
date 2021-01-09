@@ -38,6 +38,31 @@ pub trait Mode: Default {
       }
     }
   }
+
+  fn segment(it: &mut impl Iterator<Item=u8>) -> Segment {
+    match Self::keyword(it) {
+      Some(b'a') => Segment::Add(Self::unum(it).unwrap(), Self::ivec(it)),
+      Some(b'd') => Segment::Del(Self::unum(it).unwrap(), Self::ivec(it)),
+      Some(b'f') => Segment::Final(Self::unum(it).unwrap(), Self::ivec(it)),
+      Some(b'l') => Segment::LProof(Self::ivec(it)),
+      Some(b'o') => Segment::Orig(Self::unum(it).unwrap(), Self::ivec(it)),
+      Some(b'r') => Segment::Reloc(Self::uvec2(it)),
+      Some(b't') => Segment::Todo(Self::unum(it).unwrap()),
+      Some(k) => panic!("bad step {:?}", k as char),
+      None => panic!("bad step None"),
+    }
+  }
+}
+
+#[derive(Debug)]
+pub enum Segment {
+  Orig(u64, Vec<i64>),
+  Add(u64, Vec<i64>),
+  LProof(Vec<i64>),
+  Reloc(Vec<(u64, u64)>),
+  Del(u64, Vec<i64>),
+  Final(u64, Vec<i64>),
+  Todo(u64),
 }
 
 #[derive(Default)] pub struct Bin;

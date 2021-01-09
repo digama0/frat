@@ -19,7 +19,7 @@ fn check_proof_step(_active: &mut HashMap<u64, (bool, Clause)>, _cl: &Clause, p:
 }
 
 pub fn check_proof(mode: impl Mode, proof: File) -> io::Result<()> {
-  let mut bp = StepParser::new(mode, proof)?.peekable();
+  let mut bp = StepIter(BackParser::new(mode, proof)?).peekable();
   let (mut orig, mut added, mut deleted, mut fin) = (0i64, 0i64, 0i64, 0i64);
   let (mut dirty_orig, mut dirty_add, mut double_del, mut double_fin) = (0i64, 0i64, 0i64, 0i64);
   let mut missing = 0i64;

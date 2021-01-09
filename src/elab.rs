@@ -7,9 +7,9 @@ use std::ops::{Deref, DerefMut, Index, IndexMut};
 use hashbrown::hash_map::{HashMap, Entry};
 use super::dimacs::parse_dimacs;
 use super::serialize::Serialize;
-use super::parser::{detect_binary, Step, StepRef, ElabStep,
+use super::parser::{detect_binary, Step, StepRef, ElabStep, Segment,
   Proof, ProofRef, Mode, Ascii, Bin, LRATParser, LRATStep};
-use super::backparser::{StepParser, ElabStepParser};
+use super::backparser::{VecBackParser, BackParser, StepIter, ElabStepIter};
 use super::perm_clause::*;
 
 struct VAssign {
@@ -409,12 +409,11 @@ fn run_rat_step<'a>(ls: &[i64], ctx: &mut Context, init: &[i64],
   steps
 }
 
-fn elab<M: Mode>(mode: M, full: bool, frat: File, temp: File) -> io::Result<()> {
-  let w = &mut BufWriter::new(temp);
+fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Result<()> {
   let mut ctx: Context = Context::new();
   let mut origs = Vec::new();
 
-  for s in StepParser::new(mode, frat)? {
+  for s in StepIter(BackParser::new(mode, frat)?) {
     // eprintln!("<- {:?}", s);
     match s {
 
@@ -484,7 +483,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, temp: File) -> io::Result<()> 
     ElabStep::Orig(i, ls).write(w).expect("Failed to write orig step");
   }
 
-  w.flush()
+  Ok(())
 }
 
 fn find_new_watch(c: &Clause, va: &VAssign) -> Option<usize> {
@@ -512,13 +511,13 @@ impl<'a, W: Write> DeleteLine<'a, W> {
   }
 }
 
-fn trim(cnf: &[Vec<i64>], temp: File, lrat: &mut impl Write) -> io::Result<()> {
+fn trim(cnf: &[Vec<i64>], temp_it: impl Iterator<Item=Segment>, lrat: &mut impl Write) -> io::Result<()> {
 
   let mut k = 0 as u64; // Counter for the last used ID
   let cnf: HashMap<PermClauseRef, u64> = // original CNF
     cnf.iter().map(|c| (PermClauseRef(c), (k += 1, k).1)).collect();
   let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
-  let mut bp = ElabStepParser::new(Bin, temp)?.peekable();
+  let mut bp = ElabStepIter(temp_it).peekable();
   let origs = k;
   let mut used_origs = vec![0u8; origs as usize];
 
@@ -617,36 +616,64 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   let dimacs = args.next().expect("missing input file");
   let frat_path = args.next().expect("missing proof file");
 
-  let temp_path = format!("{}.temp", frat_path);
-  let mut frat = File::open(frat_path)?;
-  let bin = detect_binary(&mut frat)?;
-  let temp_write = File::create(&temp_path)?;
-  println!("elaborating...");
-  if bin { elab(Bin, full, frat, temp_write)? }
-  else { elab(Ascii, full, frat, temp_write)? };
-
-  if !full {
-    println!("parsing DIMACS...");
-    let temp_read = File::open(temp_path)?;
-    let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
-    println!("trimming...");
-    if let Some(lrat_file) = args.next() {
-      let mut lrat = BufWriter::new(File::create(&lrat_file)?);
-      trim(&cnf, temp_read, &mut lrat)?;
-      lrat.flush()?;
-      match args.next() {
-        Some(ref s) if s == "-v" => {
-          println!("verifying...");
-          check_lrat(Ascii, cnf, &lrat_file)?;
-          println!("VERIFIED");
-        }
-        _ => ()
-      }
-    } else {
-      trim(&cnf, temp_read, &mut io::sink())?;
+  let mut frat = File::open(&frat_path)?;
+  let in_mem = match args.peek() {
+    Some(arg) if arg.starts_with("-m") => {
+      let n = if let Ok(n) = arg[2..].parse() { n }
+      else { frat.metadata()?.len().saturating_mul(5) };
+      args.next();
+      Some(n)
     }
+    _ => None
+  };
+
+  let bin = detect_binary(&mut frat)?;
+  println!("elaborating...");
+  if let Some(temp_sz) = in_mem {
+    let mut temp = Vec::with_capacity(temp_sz as usize);
+    if bin { elab(Bin, full, frat, &mut temp)? }
+    else { elab(Ascii, full, frat, &mut temp)? }
+
+    return finish(args, full, dimacs, VecBackParser(temp))
+  } else {
+    let temp_path = format!("{}.temp", frat_path);
+    {
+      let mut temp_write = BufWriter::new(File::create(&temp_path)?);
+      if bin { elab(Bin, full, frat, &mut temp_write)? }
+      else { elab(Ascii, full, frat, &mut temp_write)? };
+      temp_write.flush()?;
+    }
+
+    let temp_read = BackParser::new(Bin, File::open(temp_path)?)?;
+    return finish(args, full, dimacs, temp_read)
   }
-  Ok(())
+
+  fn finish(mut args: impl Iterator<Item=String>,
+    full: bool, dimacs: String,
+    temp_read: impl Iterator<Item=Segment>
+  ) -> io::Result<()> {
+    if !full {
+      println!("parsing DIMACS...");
+      let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
+      println!("trimming...");
+      if let Some(lrat_file) = args.next() {
+        let mut lrat = BufWriter::new(File::create(&lrat_file)?);
+        trim(&cnf, temp_read, &mut lrat)?;
+        lrat.flush()?;
+        match args.next() {
+          Some(ref s) if s == "-v" => {
+            println!("verifying...");
+            check_lrat(Ascii, cnf, &lrat_file)?;
+            println!("VERIFIED");
+          }
+          _ => ()
+        }
+      } else {
+        trim(&cnf, temp_read, &mut io::sink())?;
+      }
+    }
+    Ok(())
+  }
 }
 
 fn check_lrat(mode: impl Mode, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Result<()> {
@@ -700,7 +727,7 @@ pub fn lratchk(mut args: impl Iterator<Item=String>) -> io::Result<()> {
 fn refrat_pass(elab: File, w: &mut impl Write) -> io::Result<()> {
 
   let mut ctx: HashMap<u64, Vec<i64>> = HashMap::new();
-  for s in ElabStepParser::new(Bin, elab)? {
+  for s in ElabStepIter(BackParser::new(Bin, elab)?) {
     eprintln!("-> {:?}", s);
 
     match s {

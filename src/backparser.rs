@@ -1,34 +1,35 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::marker::PhantomData;
 use super::parser::*;
 pub use super::parser::{Proof, Step, ElabStep};
 
 const BUFFER_SIZE: usize = 0x4000;
 
-#[derive(Debug)]
-enum Segment {
-  Orig(u64, Vec<i64>),
-  Add(u64, Vec<i64>),
-  LProof(Vec<i64>),
-  Reloc(Vec<(u64, u64)>),
-  Del(u64, Vec<i64>),
-  Final(u64, Vec<i64>),
-  Todo(u64),
+pub struct VecBackParser(pub Vec<u8>);
+
+impl Iterator for VecBackParser {
+  type Item = Segment;
+
+  fn next(&mut self) -> Option<Segment> {
+    let (&n, most) = self.0.split_last()?;
+    if n != 0 { panic!("expected 0 byte") }
+    let i = most.iter().rposition(|&n| n == 0).map_or(0, |i| i + 1);
+    Some(Bin::segment(&mut self.0.drain(i..)))
+  }
 }
 
-struct BackParser<M> {
+pub struct BackParser<M> {
   file: File,
   remaining: usize,
   pos: usize,
   last_read: usize,
   buffers: Vec<Box<[u8]>>,
   free: Vec<Box<[u8]>>,
-  _marker: PhantomData<M>,
+  _mode: M,
 }
 
 impl<M> BackParser<M> {
-  pub fn new(mut file: File) -> io::Result<BackParser<M>> {
+  pub fn new(mode: M, mut file: File) -> io::Result<BackParser<M>> {
     let len = file.metadata()?.len() as usize;
     let pos = len.checked_sub(1).map_or(0, |l| l % BUFFER_SIZE + 1);
     file.seek(SeekFrom::End(-(pos as i64)))?;
@@ -41,7 +42,7 @@ impl<M> BackParser<M> {
       last_read: pos,
       buffers: vec![buf],
       free: Vec::new(),
-      _marker: PhantomData
+      _mode: mode
     })
   }
 
@@ -57,28 +58,14 @@ impl<M> BackParser<M> {
 }
 
 impl<M: Mode> BackParser<M> {
-  fn parse_segment<I: Iterator<Item=u8>>(mut it: I) -> Segment {
-    match M::keyword(&mut it) {
-      Some(b'a') => Segment::Add(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
-      Some(b'd') => Segment::Del(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
-      Some(b'f') => Segment::Final(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
-      Some(b'l') => Segment::LProof(M::ivec(&mut it)),
-      Some(b'o') => Segment::Orig(M::unum(&mut it).unwrap(), M::ivec(&mut it)),
-      Some(b'r') => Segment::Reloc(M::uvec2(&mut it)),
-      Some(b't') => Segment::Todo(M::unum(&mut it).unwrap()),
-      Some(k) => panic!("bad step {:?}", k as char),
-      None => panic!("bad step None"),
-    }
-  }
-
   fn parse_segment_from(&mut self, b: usize, i: usize) -> Segment {
     if b == 0 {
-      let res = Self::parse_segment(self.buffers[0][i..self.pos].iter().copied());
+      let res = M::segment(&mut self.buffers[0][i..self.pos].iter().copied());
       self.pos = i;
       return res
     } else {
-      let res = Self::parse_segment(
-        self.buffers[b][i..].iter()
+      let res = M::segment(
+        &mut self.buffers[b][i..].iter()
           .chain(self.buffers[1..b].iter().rev().flat_map(|buf| buf.iter()))
           .chain(self.buffers[0][..self.pos].iter()).copied());
       self.pos = i;
@@ -119,15 +106,9 @@ impl<M: Mode> Iterator for BackParser<M> {
   }
 }
 
-pub struct StepParser<M>(BackParser<M>);
+pub struct StepIter<I>(pub I);
 
-impl<M> StepParser<M> {
-  pub fn new(_: M, file: File) -> io::Result<StepParser<M>> {
-    Ok(StepParser(BackParser::new(file)?))
-  }
-}
-
-impl<M: Mode> Iterator for StepParser<M> {
+impl<I: Iterator<Item=Segment>> Iterator for StepIter<I> {
   type Item = Step;
 
   fn next(&mut self) -> Option<Step> {
@@ -148,15 +129,9 @@ impl<M: Mode> Iterator for StepParser<M> {
   }
 }
 
-pub struct ElabStepParser<M>(BackParser<M>);
+pub struct ElabStepIter<I>(pub I);
 
-impl<M> ElabStepParser<M> {
-  pub fn new(_: M, file: File) -> io::Result<ElabStepParser<M>> {
-    Ok(ElabStepParser(BackParser::new(file)?))
-  }
-}
-
-impl<M: Mode> Iterator for ElabStepParser<M> {
+impl<I: Iterator<Item=Segment>> Iterator for ElabStepIter<I> {
   type Item = ElabStep;
 
   fn next(&mut self) -> Option<ElabStep> {
