@@ -30,13 +30,13 @@ struct BackParser<M> {
 impl<M> BackParser<M> {
   pub fn new(mut file: File) -> io::Result<BackParser<M>> {
     let len = file.metadata()?.len() as usize;
-    let pos = len % BUFFER_SIZE;
+    let pos = len.checked_sub(1).map_or(0, |l| l % BUFFER_SIZE + 1);
     file.seek(SeekFrom::End(-(pos as i64)))?;
     let mut buf = Box::new([0; BUFFER_SIZE]);
     file.read_exact(&mut buf[..pos])?;
     Ok(BackParser {
       file,
-      remaining: len / BUFFER_SIZE,
+      remaining: len / BUFFER_SIZE - if pos == BUFFER_SIZE {1} else {0},
       pos,
       last_read: pos,
       buffers: vec![buf],
@@ -73,11 +73,11 @@ impl<M: Mode> BackParser<M> {
 
   fn parse_segment_from(&mut self, b: usize, i: usize) -> Segment {
     if b == 0 {
-      let res = BackParser::<M>::parse_segment(self.buffers[0][i..self.pos].iter().copied());
+      let res = Self::parse_segment(self.buffers[0][i..self.pos].iter().copied());
       self.pos = i;
       return res
     } else {
-      let res = BackParser::<M>::parse_segment(
+      let res = Self::parse_segment(
         self.buffers[b][i..].iter()
           .chain(self.buffers[1..b].iter().rev().flat_map(|buf| buf.iter()))
           .chain(self.buffers[0][..self.pos].iter()).copied());
