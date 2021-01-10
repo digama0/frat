@@ -89,6 +89,17 @@ fn add_watch(watch: &mut HashMap<i64, HashMap<u64, ()>>, l: i64, id: u64) {
     "Clause already watched");
 }
 
+fn dedup_vec<T: PartialEq>(vec: &mut Vec<T>) {
+  let mut i = 0;
+  while i < vec.len() {
+    if vec[..i].contains(&vec[i]) {
+      vec.swap_remove(i);
+    } else {
+      i += 1;
+    }
+  }
+}
+
 impl Context {
 
   fn new() -> Context { Default::default() }
@@ -129,10 +140,16 @@ impl Context {
       "at {:?}: Clause {} to be inserted already exists", self.step, i);
   }
 
-  fn remove(&mut self, i: u64) -> Clause {
+  fn remove(&mut self, i: u64, check_subsumed: Option<&[i64]>) -> Clause {
 
     let c: Clause = self.clauses.remove(&i).unwrap_or_else(
       || panic!("at {:?}: Clause {} to be removed does not exist", self.step, i));
+
+    if let Some(lits) = check_subsumed {
+      assert!(lits.iter().all(|lit| c.contains(lit)),
+        "at {:?}: Clause {:?} added here will later be deleted as {:?}",
+        self.step, &*c, lits)
+    }
 
     match c.len() {
       0 => {}
@@ -419,26 +436,26 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
 
       Step::Orig(i, ls) => {
         ctx.step = Some(i);
-        if full || ctx.marked(i) {  // If the original clause is marked
-          origs.push((i, ls)); // delay origs to the end
+        let c = ctx.remove(i, Some(&ls));
+        if full || c.marked {  // If the original clause is marked
+          origs.push((i, c.lits)); // delay origs to the end
         }
         // else { eprintln!("delete {}", i); }
-        ctx.remove(i);
       }
 
       Step::Add(i, ls, p) => {
         ctx.step = Some(i);
-        let c = ctx.remove(i);
+        let c = ctx.remove(i, Some(&ls));
         if full || c.marked {
           let steps: Vec<i64> = if let Some(Proof::LRAT(is)) = p {
             if let Some(start) = is.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
               let (init, rest) = is.split_at(start);
-              run_rat_step(&ls, &mut ctx, init, rest.split_first(), false)
+              run_rat_step(&c, &mut ctx, init, rest.split_first(), false)
             } else {
-              run_rat_step(&ls, &mut ctx, &is, None, false)
+              run_rat_step(&c, &mut ctx, &is, None, false)
             }
           } else {
-            run_rat_step(&ls, &mut ctx, &[], None, false)
+            run_rat_step(&c, &mut ctx, &[], None, false)
           };
           for &i in &steps {
             let i = i.abs() as u64;
@@ -450,7 +467,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
               }
             }
           }
-          ElabStep::Add(i, ls, steps).write(w).expect("Failed to write add step");
+          ElabStep::Add(i, c.lits, steps).write(w).expect("Failed to write add step");
         }
         // else { eprintln!("delete {}", i); }
       }
@@ -463,15 +480,17 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
         }
       }
 
-      Step::Del(i, ls) => {
+      Step::Del(i, mut ls) => {
+        dedup_vec(&mut ls);
         ctx.insert(i, false, ls);
         if full {
           ElabStep::Del(i).write(w).expect("Failed to write delete step");
         }
       },
 
-      Step::Final(i, ls) => {
+      Step::Final(i, mut ls) => {
         // Identical to the Del case, except that the clause should be marked if empty
+        dedup_vec(&mut ls);
         ctx.insert(i, ls.is_empty(), ls);
       }
 
@@ -710,7 +729,7 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Resul
 
       LRATStep::Del(ls) => {
         assert!(i == k, "out-of-order LRAT proofs not supported");
-        for c in ls { ctx.remove(c.try_into().unwrap()); }
+        for c in ls { ctx.remove(c.try_into().unwrap(), None); }
       }
     }
   }
