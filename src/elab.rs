@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::mem;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 use std::collections::{HashMap, hash_map::Entry};
-use super::dimacs::parse_dimacs;
+use super::dimacs::{parse_dimacs, parse_dimacs_map};
 use super::serialize::Serialize;
 use super::parser::{detect_binary, Step, StepRef, ElabStep, Segment,
   Proof, ProofRef, Mode, Ascii, Bin, LRATParser, LRATStep};
@@ -671,7 +671,8 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   ) -> io::Result<()> {
     if !full {
       println!("parsing DIMACS...");
-      let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.bytes());
+      let (_vars, cnf) = parse_dimacs_map(read_to_string(dimacs)?.bytes(),
+        |mut c| {dedup_vec(&mut c); c.into()});
       println!("trimming...");
       if let Some(lrat_file) = args.next() {
         let mut lrat = BufWriter::new(File::create(&lrat_file)?);
