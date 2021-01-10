@@ -1,3 +1,4 @@
+use std::convert::TryInto;
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum Token {
   Nat(i64),
@@ -28,16 +29,16 @@ impl<I: Iterator<Item=u8>> Lexer<I> {
     let mut lex = Lexer {
       input,
       buffer: Vec::new(),
-			peek: 0
-		};
+      peek: 0
+    };
     lex.bump();
     lex
   }
 
   fn bump_opt(&mut self) -> Option<u8> {
     let peeked = self.input.next()?;
-		self.peek = peeked;
-		Some(peeked)
+    self.peek = peeked;
+    Some(peeked)
   }
 
   fn bump(&mut self) -> u8 {
@@ -104,24 +105,42 @@ impl<I: Iterator<Item=u8>> Iterator for Lexer<I> {
 }
 
 pub type Clause = Box<[i64]>;
-pub fn parse_dimacs(input: impl Iterator<Item=u8>) -> (usize, Vec<Clause>) {
-  let mut lex = Lexer::from(input);
-  match (lex.next(), lex.next(), lex.next(), lex.next()) {
-    (Some(Ident(Problem)), Some(Ident(Cnf)), Some(Nat(vars)), Some(Nat(clauses))) => {
-      let mut fmla = Vec::with_capacity(clauses as usize);
-      loop {
-        let mut clause = Vec::new();
-        loop {
-          match lex.next() {
-            Some(Nat(0)) => break,
-            Some(Nat(lit)) => clause.push(lit),
-            None => return (vars as usize, fmla),
-            _ => panic!("parse DIMACS failed")
-          }
-        }
-        fmla.push(clause.into());
-      }
-    },
-    _ => panic!("parse DIMACS failed")
+
+pub struct DimacsIter<I>(Lexer<I>);
+
+impl<I: Iterator<Item=u8>> DimacsIter<I> {
+  pub fn from(input: I) -> (usize, usize, Self) {
+    let mut lex = Lexer::from(input);
+    match (lex.next(), lex.next(), lex.next(), lex.next()) {
+      (Some(Ident(Problem)), Some(Ident(Cnf)), Some(Nat(vars)), Some(Nat(clauses))) =>
+        (vars.try_into().unwrap(), clauses.try_into().unwrap(), DimacsIter(lex)),
+      _ => panic!("parse DIMACS failed")
+    }
   }
+}
+
+impl<I: Iterator<Item=u8>> Iterator for DimacsIter<I> {
+  type Item = Vec<i64>;
+  fn next(&mut self) -> Option<Vec<i64>> {
+    let mut clause = Vec::new();
+    loop {
+      match self.0.next()? {
+        Nat(0) => break,
+        Nat(lit) => clause.push(lit),
+        _ => panic!("parse DIMACS failed")
+      }
+    }
+    Some(clause)
+  }
+}
+
+pub fn parse_dimacs_map<T>(input: impl Iterator<Item=u8>, f: impl FnMut(Vec<i64>) -> T) -> (usize, Vec<T>) {
+  let (vars, clauses, it) = DimacsIter::from(input);
+  let mut fmla = Vec::with_capacity(clauses);
+  fmla.extend(it.map(f));
+  (vars, fmla)
+}
+
+pub fn parse_dimacs(input: impl Iterator<Item=u8>) -> (usize, Vec<Clause>) {
+  parse_dimacs_map(input, |x| x.into())
 }
