@@ -1,6 +1,6 @@
 use std::io::{self, Seek, SeekFrom, Read, BufReader, Write, BufWriter};
 use std::fs::{File, read_to_string};
-use hashbrown::hash_map::{HashMap};
+use std::collections::HashMap;
 use super::dimacs::parse_dimacs;
 use super::parser::{detect_binary, Mode, Bin, Ascii, DRATParser, DRATStep, StepRef};
 use super::serialize::Serialize;

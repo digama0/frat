@@ -4,7 +4,7 @@ use std::convert::TryInto;
 use std::collections::VecDeque;
 use std::mem;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
-use hashbrown::hash_map::{HashMap, Entry};
+use std::collections::{HashMap, hash_map::Entry};
 use super::dimacs::parse_dimacs;
 use super::serialize::Serialize;
 use super::parser::{detect_binary, Step, StepRef, ElabStep, Segment,

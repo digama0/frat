@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::process::exit;
-use hashbrown::hash_map::HashMap;
+use std::collections::HashMap;
 use std::io;
 use super::parser::{detect_binary, Mode, Ascii, Bin};
 use super::backparser::*;
