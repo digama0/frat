@@ -2,7 +2,6 @@ use byteorder::{WriteBytesExt, LittleEndian};
 use std::mem;
 use std::fmt;
 use std::rc::Rc;
-use std::convert::{TryInto};
 use std::cell::RefCell;
 use std::fs::{File, read_to_string};
 use std::io::{self, *};
@@ -122,9 +121,9 @@ enum RUPStep {
 }
 impl RUPStep {
 	fn _unit(&self) -> i64 {
-    match self {
-      &RUPStep::Hyp(u) => u,
-      &RUPStep::UP(_, _, u) => u
+    match *self {
+      RUPStep::Hyp(u) => u,
+      RUPStep::UP(_, _, u) => u
     }
   }
 }
@@ -150,7 +149,7 @@ impl Pass2 {
 		let mut assign = vec![None; self.vars];
 		for a in &self.active {
 			if a.cl.len() == 1 {
-				assign[var(a.cl[0])] = Some((HRHyp::Unit(a.step.clone()), !(a.cl[0] > 0)))
+				assign[var(a.cl[0])] = Some((HRHyp::Unit(a.step.clone()), a.cl[0] <= 0))
       }
     }
 		for &lit in cl.iter() { assign[var(lit)] = Some((HRHyp::Me, lit > 0)) }
@@ -179,7 +178,7 @@ impl Pass2 {
 			let mut hr = Vec::new();
 			for &lit in a.cl.iter() {
 				match assign[var(lit)] {
-					Some((ref s, val)) if val == (lit > 0) => hr.push(s.clone()),
+					Some((s, val)) if val == (lit > 0) => hr.push(s),
 					_ if unit == 0 => unit = -lit,
 					_ => return None
         }
@@ -217,7 +216,7 @@ impl Pass2 {
 			let r = &mut local_steps[i];
 			if !r.1 {
 				r.1 = true;
-				if let &RUPStep::UP(_, ref cl2, lit) = &r.0 {
+				if let RUPStep::UP(_, ref cl2, lit) = r.0 {
 					for &lit2 in cl2.iter() {
             if lit2 != lit {
 						  stack.push(assign[var(lit2)].unwrap().0)
@@ -277,7 +276,7 @@ impl<F: Write> Serializer<F> {
 		self.0.write_u32::<LittleEndian>(i).expect("write failed");
 		self.1 += 4 }
 	fn write_lit(&mut self, i: i64) {
-		self.0.write_i64::<LittleEndian>(i.try_into().expect("literal out of range")).expect("write failed");
+		self.0.write_i64::<LittleEndian>(i).expect("write failed");
 		self.1 += 4 }
 	fn write_clause(&mut self, c: &Clause) {
 		for &lit in c.iter() { self.write_lit(lit) }
@@ -288,7 +287,7 @@ impl<F: Write> Serializer<F> {
   }
 }
 
-pub fn process_proof(vars: usize, fmla: &Vec<Clause>, drat: ProofIter<impl Iterator<Item=u8>>, frat: bool) {
+pub fn process_proof(vars: usize, fmla: &[Clause], drat: ProofIter<impl Iterator<Item=u8>>, frat: bool) {
   let mut pass1 = Pass1::new();
   for cl in fmla { pass1.add(cl.clone(), true) }
   for (k, cl) in drat {

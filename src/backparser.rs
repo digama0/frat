@@ -62,7 +62,7 @@ impl<M: Mode> BackParser<M> {
     if b == 0 {
       let res = M::segment(&mut self.buffers[0][i..self.pos].iter().copied());
       self.pos = i;
-      return res
+      res
     } else {
       let res = M::segment(
         &mut self.buffers[b][i..].iter()
@@ -70,7 +70,7 @@ impl<M: Mode> BackParser<M> {
           .chain(self.buffers[0][..self.pos].iter()).copied());
       self.pos = i;
       self.free.extend(self.buffers.drain(0..b));
-      return res
+      res
     }
   }
 }

@@ -11,10 +11,10 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
       None => return Ok(()),
       Some(c) if c == b't' || c == b'l' => while r.next() != Some(0) {},
       Some(c) => {
-        w.write(&[c])?;
+        w.write_all(&[c])?;
         loop {
           let c = r.next().unwrap();
-          w.write(&[c])?;
+          w.write_all(&[c])?;
           if c == 0 {break}
         }
       }

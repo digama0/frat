@@ -7,15 +7,8 @@ use super::backparser::*;
 
 type Clause = Vec<i64>;
 
-fn subsumes(clause: &Clause, clause2: &Clause) -> bool {
+fn subsumes(clause: &[i64], clause2: &[i64]) -> bool {
   clause2.iter().all(|lit2| clause.contains(lit2))
-}
-
-fn check_proof_step(_active: &mut HashMap<u64, (bool, Clause)>, _cl: &Clause, p: Option<Proof>) -> Option<Proof> {
-  match p {
-    None => Some(Proof::Sorry),
-    Some(p) => Some(p)
-  }
 }
 
 pub fn check_proof(mode: impl Mode, proof: File) -> io::Result<()> {
@@ -55,19 +48,14 @@ pub fn check_proof(mode: impl Mode, proof: File) -> io::Result<()> {
             bad = true;
           }
           if need {
-            if let Some(p) = check_proof_step(&mut active, &lits, p) {
-              if let Proof::LRAT(steps) = p {
-                for s in steps {
-                  let needed = &mut active.get_mut(&(s.abs() as u64)).expect("bad LRAT proof").0;
-                  if !*needed {
-                    // unimplemented!();
-                    *needed = true;
-                  }
+            if let Some(Proof::LRAT(steps)) = p {
+              for s in steps {
+                let needed = &mut active.get_mut(&(s.abs() as u64)).expect("bad LRAT proof").0;
+                if !*needed {
+                  // unimplemented!();
+                  *needed = true;
                 }
               }
-            } else {
-              eprintln!("bad proof for {:?}", lits);
-              bad = true;
             }
           }
         } else {

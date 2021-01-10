@@ -96,13 +96,13 @@ impl Mode for Bin {
 impl Ascii {
   fn spaces(it: &mut impl Iterator<Item=u8>) -> Option<u8> {
     loop { match it.next() {
-      Some(c) if c == (' ' as u8) || c == ('\n' as u8) || c == ('\r' as u8) => {},
+      Some(c) if c == b' ' || c == b'\n' || c == b'\r' => {},
       o => return o
     } }
   }
   fn initial_neg(it: &mut impl Iterator<Item=u8>) -> (bool, Option<u8>) {
     match Ascii::spaces(it) {
-      Some(c) if c == ('-' as u8) => (true, it.next()),
+      Some(c) if c == b'-' => (true, it.next()),
       o => (false, o)
     }
   }
@@ -133,7 +133,7 @@ impl Mode for Ascii {
 }
 
 pub fn detect_binary(f: &mut File) -> io::Result<bool> {
-  if let Err(_) = f.seek(SeekFrom::End(-1)) { return Ok(false) }
+  if f.seek(SeekFrom::End(-1)).is_err() { return Ok(false) }
   let mut c = [0u8; 1];
   f.read_exact(&mut c)?;
   Ok(c[0] == 0)
@@ -198,7 +198,6 @@ impl<M: Mode, I: Iterator<Item=u8>> Iterator for DRATParser<M, I> {
 #[derive(Debug)]
 pub enum Proof {
   LRAT(Vec<i64>),
-  Sorry
 }
 
 #[derive(Debug)]
@@ -222,7 +221,6 @@ pub enum ElabStep {
 #[derive(Debug, Copy, Clone)]
 pub enum ProofRef<'a> {
   LRAT(&'a [i64]),
-  Sorry
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -239,7 +237,6 @@ impl Proof {
   pub fn as_ref(&self) -> ProofRef {
     match self {
       Proof::LRAT(v) => ProofRef::LRAT(v),
-      Proof::Sorry => ProofRef::Sorry
     }
   }
 }

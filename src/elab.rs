@@ -193,18 +193,18 @@ impl Context {
 
   #[inline] fn watch_idx(&mut self, idx: usize, i: u64, va: &VAssign) -> bool {
 
-    let c = self.clauses.get_mut(&i).unwrap();
-    let l = c[idx];
+    let clause = self.clauses.get_mut(&i).unwrap();
+    let l = clause[idx];
 
     if va.val(l).is_none() { return true }
-    if let Some(j) = find_new_watch(c, va) {
+    if let Some(j) = find_new_watch(clause, va) {
       // eprintln!("Working on clause {}: {:?} at {}", i, c, j);
-      let k = c[j];
-      c[idx] = k;
-      c[j] = l;
-      let w = self.watch();
-      del_watch(w, l, i);
-      add_watch(w, k, i);
+      let k = clause[j];
+      clause[idx] = k;
+      clause[j] = l;
+      let watch = self.watch();
+      del_watch(watch, l, i);
+      add_watch(watch, k, i);
       true
     } else {false}
   }
@@ -257,7 +257,7 @@ impl Hint {
         }
       }
     }
-    self.steps.retain({ let mut i = 0; move |_| (need[i], i += 1).0 });
+    self.steps.retain({ let mut i = 0; move |_| { let b = need[i]; i += 1; b } });
   }
 }
 
@@ -337,12 +337,10 @@ fn propagate_hint(ls: &[i64], ctx: &Context, is: &[i64], strict: bool) -> (Hint,
       let mut uf: Option<i64> = None;
       let cl = ctx.get(c);
       for l in cl {
-        if !ht.reasons.contains_key(&-l) {
-          if uf.replace(l).is_some() {
-            assert!(!strict, "at {:?}: clause {:?} is not unit", ctx.step, c);
-            queue.push(c);
-            continue 'a
-          }
+        if !ht.reasons.contains_key(&-l) && uf.replace(l).is_some() {
+          assert!(!strict, "at {:?}: clause {:?} is not unit", ctx.step, c);
+          queue.push(c);
+          continue 'a
         }
       }
       match uf {
@@ -517,7 +515,7 @@ impl<'a, W: Write> DeleteLine<'a, W> {
   ) -> io::Result<()> {
     let mut l = DeleteLine(lrat, step, false);
     f(&mut l)?;
-    if l.2 { write!(l.0, " 0\n")? }
+    if l.2 { writeln!(l.0, " 0")? }
     Ok(())
   }
 
@@ -532,10 +530,10 @@ impl<'a, W: Write> DeleteLine<'a, W> {
 
 fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut impl Write) -> io::Result<()> {
 
-  let mut k = 0 as u64; // Counter for the last used ID
+  let mut k = 0u64; // Counter for the last used ID
   let cnf: HashMap<PermClauseRef, u64> = // original CNF
-    cnf.iter().map(|c| (PermClauseRef(c), (k += 1, k).1)).collect();
-  let mut m: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
+    cnf.iter().map(|c| (PermClauseRef(c), {k += 1; k})).collect();
+  let mut map: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
   let mut bp = ElabStepIter(temp_it).peekable();
   let origs = k;
   let mut used_origs = vec![0u8; origs as usize];
@@ -547,10 +545,10 @@ fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut imp
         || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls));
       let r = &mut used_origs[j as usize - 1];
       *r = r.saturating_add(1);
-      assert!(m.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
+      assert!(map.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
       // eprintln!("{} -> {}", i, j);
       if ls.is_empty() {
-        write!(lrat, "{} 0 {} 0\n", k+1, j)?;
+        writeln!(lrat, "{} 0 {} 0", k+1, j)?;
         return Ok(())
       }
     } else {unreachable!()}
@@ -573,34 +571,34 @@ fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut imp
 
       ElabStep::Add(i, ls, is) => {
         k += 1; // Get the next fresh ID
-        m.insert(i, k); // The ID of added clause is mapped to a fresh ID
+        map.insert(i, k); // The ID of added clause is mapped to a fresh ID
         // eprintln!("{} -> {}", i, k);
-        let b = ls.is_empty();
+        let done = ls.is_empty();
 
         write!(lrat, "{}", k)?;
         for &x in &*ls { write!(lrat, " {}", x)? }
         write!(lrat, " 0")?;
         for x in is {
           let ux = x.abs() as u64;
-          let s = *m.get(&ux).unwrap_or_else(||
+          let lit = *map.get(&ux).unwrap_or_else(||
             panic!("step {}: proof step {:?} not found", i, ux)) as i64;
-          write!(lrat, " {}", if x < 0 {-s} else {s})?
+          write!(lrat, " {}", if x < 0 {-lit} else {lit})?
         }
-        write!(lrat, " 0\n")?;
+        writeln!(lrat, " 0")?;
 
-        if b {return Ok(())}
+        if done {return Ok(())}
       }
 
       ElabStep::Reloc(relocs) => {
         let removed: Vec<_> = relocs.iter()
-          .map(|(from, to)| (*to, m.remove(from))).collect();
+          .map(|(from, to)| (*to, map.remove(from))).collect();
         for (to, o) in removed {
-          if let Some(s) = o { m.insert(to, s); }
+          if let Some(s) = o { map.insert(to, s); }
         }
       }
 
       ElabStep::Del(i) => DeleteLine::with(lrat, k, |line| {
-        let m = &mut m;
+        let m = &mut map;
         let used_origs = &mut used_origs;
         let mut delete = move |i| -> io::Result<()> {
           let j = m.remove(&i).unwrap();

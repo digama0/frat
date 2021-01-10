@@ -14,10 +14,6 @@ impl Serialize for u8 {
   fn write(&self, w: &mut impl Write) -> io::Result<()> { w.write_all(&[*self]) }
 }
 
-impl Serialize for char {
-  fn write(&self, w: &mut impl Write) -> io::Result<()> { (*self as u8).write(w) }
-}
-
 impl<'a, A: Serialize> Serialize for &'a [A] {
   fn write(&self, w: &mut impl Write) -> io::Result<()> {
     for v in *self { v.write(w)? }
@@ -51,16 +47,14 @@ impl Serialize for i64 {
 impl<'a> Serialize for StepRef<'a> {
   fn write(&self, w: &mut impl Write) -> io::Result<()> {
     match *self {
-      StepRef::Orig(idx, vec) => ('o', (idx, vec)).write(w),
-      StepRef::Add(idx, vec, None) => ('a', (idx, vec)).write(w),
-      StepRef::Add(idx, vec, Some(ProofRef::Sorry)) =>
-        (('t', (127u8, 0u8)), ('a', (idx, vec))).write(w),
+      StepRef::Orig(idx, vec) => (b'o', (idx, vec)).write(w),
+      StepRef::Add(idx, vec, None) => (b'a', (idx, vec)).write(w),
       StepRef::Add(idx, vec, Some(ProofRef::LRAT(steps))) =>
-        (('a', (idx, vec)), ('l', steps)).write(w),
-      StepRef::Reloc(relocs) => ('r', relocs).write(w),
-      StepRef::Del(idx, vec) => ('d', (idx, vec)).write(w),
-      StepRef::Final(idx, vec) => ('f', (idx, vec)).write(w),
-      StepRef::Todo(idx) => ('t', (idx, 0u8)).write(w),
+        ((b'a', (idx, vec)), (b'l', steps)).write(w),
+      StepRef::Reloc(relocs) => (b'r', relocs).write(w),
+      StepRef::Del(idx, vec) => (b'd', (idx, vec)).write(w),
+      StepRef::Final(idx, vec) => (b'f', (idx, vec)).write(w),
+      StepRef::Todo(idx) => (b't', (idx, 0u8)).write(w),
     }
   }
 }
@@ -74,11 +68,11 @@ impl Serialize for Step {
 impl Serialize for ElabStep {
   fn write(&self, w: &mut impl Write) -> io::Result<()> {
     match *self {
-      ElabStep::Orig(idx, ref vec) => ('o', (idx, &**vec)).write(w),
+      ElabStep::Orig(idx, ref vec) => (b'o', (idx, &**vec)).write(w),
       ElabStep::Add(idx, ref vec, ref steps) =>
-        (('a', (idx, &**vec)), ('l', &**steps)).write(w),
-      ElabStep::Reloc(ref relocs) => ('r', &**relocs).write(w),
-      ElabStep::Del(idx) => ('d', (idx, 0u8)).write(w),
+        ((b'a', (idx, &**vec)), (b'l', &**steps)).write(w),
+      ElabStep::Reloc(ref relocs) => (b'r', &**relocs).write(w),
+      ElabStep::Del(idx) => (b'd', (idx, 0u8)).write(w),
     }
   }
 }

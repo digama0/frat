@@ -13,7 +13,7 @@ impl<'a> Hash for PermClauseRef<'a> {
     // Permutation-stable hash function from drat-trim.c
     let (mut sum, mut prod, mut xor) = (Wrapping(0u64), Wrapping(1u64), Wrapping(0u64));
     for &i in self.0 { let i = Wrapping(i as u64); prod *= i; sum += i; xor ^= i; }
-    (Wrapping(1023) * sum + prod ^ (Wrapping(31) * xor)).hash(h)
+    ((Wrapping(1023) * sum + prod) ^ (Wrapping(31) * xor)).hash(h)
   }
 }
 
