@@ -6,7 +6,7 @@ use super::parser::{detect_binary, Mode, Bin, Ascii, DRATParser, DRATStep, StepR
 use super::serialize::Serialize;
 use super::perm_clause::*;
 
-fn from_drat(mode: impl Mode, cnf: Vec<Vec<i64>>, drat: File, frat: File) -> io::Result<()> {
+fn from_drat(mode: impl Mode, cnf: Vec<Box<[i64]>>, drat: File, frat: File) -> io::Result<()> {
   let drat = DRATParser::from(mode, BufReader::new(drat).bytes().map(Result::unwrap));
   let w = &mut BufWriter::new(frat);
   let mut k = 0; // Counter for the last used ID
@@ -14,7 +14,7 @@ fn from_drat(mode: impl Mode, cnf: Vec<Vec<i64>>, drat: File, frat: File) -> io:
   for ls in cnf {
     k += 1;
     StepRef::Orig(k, &ls).write(w)?;
-    ctx.entry(PermClause(ls)).or_insert_with(Vec::new).push(k);
+    ctx.entry(PermClause(ls.into())).or_default().push(k);
   }
 
   for s in drat {
@@ -25,7 +25,7 @@ fn from_drat(mode: impl Mode, cnf: Vec<Vec<i64>>, drat: File, frat: File) -> io:
       DRATStep::Add(ls) => {
         k += 1; // Get the next fresh ID
         StepRef::Add(k, &ls, None).write(w)?;
-        ctx.entry(PermClause(ls)).or_insert_with(Vec::new).push(k);
+        ctx.entry(PermClause(ls)).or_default().push(k);
       }
 
       DRATStep::Del(ls) => {
@@ -49,7 +49,7 @@ fn from_drat(mode: impl Mode, cnf: Vec<Vec<i64>>, drat: File, frat: File) -> io:
 }
 
 pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
-  let (_vars, cnf) = parse_dimacs(read_to_string(args.next().expect("missing input file"))?.chars());
+  let (_vars, cnf) = parse_dimacs(read_to_string(args.next().expect("missing input file"))?.bytes());
   let mut drat = File::open(args.next().expect("missing proof file"))?;
   let bin = detect_binary(&mut drat)?;
   drat.seek(SeekFrom::Start(0))?;

@@ -120,7 +120,7 @@ impl Ascii {
 impl Mode for Ascii {
   const OFFSET: usize = 0;
   const BIN: bool = false;
-  fn back_scan(c: u8) -> bool { c > ('9' as u8) }
+  fn back_scan(c: u8) -> bool { c > b'9' }
   fn keyword(it: &mut impl Iterator<Item=u8>) -> Option<u8> { Ascii::spaces(it) }
   fn unum(it: &mut impl Iterator<Item=u8>) -> Option<u64> {
     Ascii::parse_num(Ascii::spaces(it), it)
@@ -158,7 +158,7 @@ impl<M: Mode, I: Iterator<Item=u8>> Iterator for LRATParser<M, I> {
       match M::keyword(&mut self.0)? {
         b'd' => LRATStep::Del(M::ivec(&mut self.0)),
         k => LRATStep::Add(
-          M::ivec(&mut Some(k).iter().cloned().chain(&mut self.0)),
+          M::ivec(&mut Some(k).into_iter().chain(&mut self.0)),
           M::ivec(&mut self.0))
       }
     ))
@@ -221,24 +221,24 @@ pub enum ElabStep {
 
 #[derive(Debug, Copy, Clone)]
 pub enum ProofRef<'a> {
-  LRAT(&'a Vec<i64>),
+  LRAT(&'a [i64]),
   Sorry
 }
 
 #[derive(Debug, Copy, Clone)]
 pub enum StepRef<'a> {
-  Orig(u64, &'a Vec<i64>),
-  Add(u64, &'a Vec<i64>, Option<ProofRef<'a>>),
-  Del(u64, &'a Vec<i64>),
-  Reloc(&'a Vec<(u64, u64)>),
-  Final(u64, &'a Vec<i64>),
+  Orig(u64, &'a [i64]),
+  Add(u64, &'a [i64], Option<ProofRef<'a>>),
+  Del(u64, &'a [i64]),
+  Reloc(&'a [(u64, u64)]),
+  Final(u64, &'a [i64]),
   Todo(u64),
 }
 
 impl Proof {
   pub fn as_ref(&self) -> ProofRef {
     match self {
-      Proof::LRAT(ref v) => ProofRef::LRAT(v),
+      Proof::LRAT(v) => ProofRef::LRAT(v),
       Proof::Sorry => ProofRef::Sorry
     }
   }
@@ -246,13 +246,13 @@ impl Proof {
 
 impl Step {
   pub fn as_ref(&self) -> StepRef {
-    match self {
-      &Step::Orig(i, ref v) => StepRef::Orig(i, v),
-      &Step::Add(i, ref v, ref p) => StepRef::Add(i, v, p.as_ref().map(Proof::as_ref)),
-      &Step::Del(i, ref v) => StepRef::Del(i, v),
-      &Step::Reloc(ref v) => StepRef::Reloc(v),
-      &Step::Final(i, ref v) => StepRef::Final(i, v),
-      &Step::Todo(i) => StepRef::Todo(i)
+    match *self {
+      Step::Orig(i, ref v) => StepRef::Orig(i, v),
+      Step::Add(i, ref v, ref p) => StepRef::Add(i, v, p.as_ref().map(Proof::as_ref)),
+      Step::Del(i, ref v) => StepRef::Del(i, v),
+      Step::Reloc(ref v) => StepRef::Reloc(v),
+      Step::Final(i, ref v) => StepRef::Final(i, v),
+      Step::Todo(i) => StepRef::Todo(i)
     }
   }
 }

@@ -1,12 +1,12 @@
 use std::hash::{Hash, Hasher};
 use std::num::Wrapping;
 
-pub fn is_perm(v: &Vec<i64>, w: &Vec<i64>) -> bool {
+pub fn is_perm(v: &[i64], w: &[i64]) -> bool {
   v.len() == w.len() && v.iter().all(|i| w.contains(i))
 }
 
 #[derive(Copy, Clone)]
-pub struct PermClauseRef<'a>(pub &'a Vec<i64>);
+pub struct PermClauseRef<'a>(pub &'a [i64]);
 
 impl<'a> Hash for PermClauseRef<'a> {
   fn hash<H: Hasher>(&self, h: &mut H) {

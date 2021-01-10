@@ -18,7 +18,7 @@ impl Serialize for char {
   fn write(&self, w: &mut impl Write) -> io::Result<()> { (*self as u8).write(w) }
 }
 
-impl<'a, A: Serialize> Serialize for &'a Vec<A> {
+impl<'a, A: Serialize> Serialize for &'a [A] {
   fn write(&self, w: &mut impl Write) -> io::Result<()> {
     for v in *self { v.write(w)? }
     0u8.write(w)
@@ -74,10 +74,10 @@ impl Serialize for Step {
 impl Serialize for ElabStep {
   fn write(&self, w: &mut impl Write) -> io::Result<()> {
     match *self {
-      ElabStep::Orig(idx, ref vec) => ('o', (idx, vec)).write(w),
+      ElabStep::Orig(idx, ref vec) => ('o', (idx, &**vec)).write(w),
       ElabStep::Add(idx, ref vec, ref steps) =>
-        (('a', (idx, vec)), ('l', steps)).write(w),
-      ElabStep::Reloc(ref relocs) => ('r', relocs).write(w),
+        (('a', (idx, &**vec)), ('l', &**steps)).write(w),
+      ElabStep::Reloc(ref relocs) => ('r', &**relocs).write(w),
       ElabStep::Del(idx) => ('d', (idx, 0u8)).write(w),
     }
   }

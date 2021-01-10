@@ -45,7 +45,7 @@ impl VAssign {
 #[derive(Debug)]
 struct Clause {
   marked: bool,
-  lits: Vec<i64>
+  lits: Box<[i64]>
 }
 
 impl<'a> IntoIterator for &'a Clause {
@@ -125,7 +125,7 @@ impl Context {
     }})
   }
 
-  fn insert(&mut self, i: u64, marked: bool, lits: Vec<i64>) {
+  fn insert(&mut self, i: u64, marked: bool, lits: Box<[i64]>) {
     let c = Clause {marked, lits};
     match c.len() {
       0 => {}
@@ -467,7 +467,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
               }
             }
           }
-          ElabStep::Add(i, c.lits, steps).write(w).expect("Failed to write add step");
+          ElabStep::Add(i, c.lits.into(), steps).write(w).expect("Failed to write add step");
         }
         // else { eprintln!("delete {}", i); }
       }
@@ -482,7 +482,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
 
       Step::Del(i, mut ls) => {
         dedup_vec(&mut ls);
-        ctx.insert(i, false, ls);
+        ctx.insert(i, false, ls.into());
         if full {
           ElabStep::Del(i).write(w).expect("Failed to write delete step");
         }
@@ -491,7 +491,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
       Step::Final(i, mut ls) => {
         // Identical to the Del case, except that the clause should be marked if empty
         dedup_vec(&mut ls);
-        ctx.insert(i, ls.is_empty(), ls);
+        ctx.insert(i, ls.is_empty(), ls.into());
       }
 
       Step::Todo(_) => ()
@@ -499,7 +499,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
   }
 
   for (i, ls) in origs {
-    ElabStep::Orig(i, ls).write(w).expect("Failed to write orig step");
+    ElabStep::Orig(i, ls.into()).write(w).expect("Failed to write orig step");
   }
 
   Ok(())
@@ -530,7 +530,7 @@ impl<'a, W: Write> DeleteLine<'a, W> {
   }
 }
 
-fn trim(cnf: &[Vec<i64>], temp_it: impl Iterator<Item=Segment>, lrat: &mut impl Write) -> io::Result<()> {
+fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut impl Write) -> io::Result<()> {
 
   let mut k = 0 as u64; // Counter for the last used ID
   let cnf: HashMap<PermClauseRef, u64> = // original CNF
@@ -578,7 +578,7 @@ fn trim(cnf: &[Vec<i64>], temp_it: impl Iterator<Item=Segment>, lrat: &mut impl 
         let b = ls.is_empty();
 
         write!(lrat, "{}", k)?;
-        for x in ls { write!(lrat, " {}", x)? }
+        for &x in &*ls { write!(lrat, " {}", x)? }
         write!(lrat, " 0")?;
         for x in is {
           let ux = x.abs() as u64;
@@ -673,7 +673,7 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   ) -> io::Result<()> {
     if !full {
       println!("parsing DIMACS...");
-      let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
+      let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.bytes());
       println!("trimming...");
       if let Some(lrat_file) = args.next() {
         let mut lrat = BufWriter::new(File::create(&lrat_file)?);
@@ -695,7 +695,7 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   }
 }
 
-fn check_lrat(mode: impl Mode, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Result<()> {
+fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat_file: &str) -> io::Result<()> {
   let lrat = File::open(lrat_file)?;
   let lp = LRATParser::from(mode, BufReader::new(lrat).bytes().map(Result::unwrap));
   let mut ctx: Context = Context::new();
@@ -724,7 +724,7 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Resul
           run_rat_step(&ls, &mut ctx, &p, None, false);
         }
         if ls.is_empty() { return Ok(()) }
-        ctx.insert(i, true, ls);
+        ctx.insert(i, true, ls.into());
       }
 
       LRATStep::Del(ls) => {
@@ -739,7 +739,7 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Vec<i64>>, lrat_file: &str) -> io::Resul
 
 pub fn lratchk(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   let dimacs = args.next().expect("missing input file");
-  let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.chars());
+  let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.bytes());
   check_lrat(Ascii, cnf, &args.next().expect("missing proof file"))
 }
 
@@ -747,7 +747,7 @@ fn refrat_pass(elab: File, w: &mut impl Write) -> io::Result<()> {
 
   let mut ctx: HashMap<u64, Vec<i64>> = HashMap::new();
   for s in ElabStepIter(BackParser::new(Bin, elab)?) {
-    eprintln!("-> {:?}", s);
+    // eprintln!("-> {:?}", s);
 
     match s {
 
