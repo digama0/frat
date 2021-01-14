@@ -8,13 +8,15 @@ pub fn is_perm(v: &[i64], w: &[i64]) -> bool {
 #[derive(Copy, Clone)]
 pub struct PermClauseRef<'a>(pub &'a [i64]);
 
-impl<'a> Hash for PermClauseRef<'a> {
-  fn hash<H: Hasher>(&self, h: &mut H) {
+pub fn get_clause_hash(lits: &[i64]) -> Wrapping<u64> {
     // Permutation-stable hash function from drat-trim.c
     let (mut sum, mut prod, mut xor) = (Wrapping(0u64), Wrapping(1u64), Wrapping(0u64));
-    for &i in self.0 { let i = Wrapping(i as u64); prod *= i; sum += i; xor ^= i; }
-    ((Wrapping(1023) * sum + prod) ^ (Wrapping(31) * xor)).hash(h)
-  }
+    for &i in lits { let i = Wrapping(i as u64); prod *= i; sum += i; xor ^= i; }
+    (Wrapping(1023) * sum + prod) ^ (Wrapping(31) * xor)
+}
+
+impl<'a> Hash for PermClauseRef<'a> {
+  fn hash<H: Hasher>(&self, h: &mut H) { get_clause_hash(&self.0).hash(h) }
 }
 
 impl<'a> PartialEq for PermClauseRef<'a> {

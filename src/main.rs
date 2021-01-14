@@ -8,6 +8,7 @@ mod dratchk;
 mod serialize;
 mod from_drat;
 mod strip_frat;
+mod drat_trim;
 
 use std::env;
 use std::io;
@@ -22,6 +23,7 @@ fn main() -> io::Result<()> {
     "refrat" => elab::refrat(args),
     "strip-frat" => strip_frat::main(args),
     "from-drat" => from_drat::main(args),
+    "drat-trim" => drat_trim::main(args),
     _ => panic!("{}", "incorrect subcommand, expected {elab, fratchk, dratchk, lratchk, refrat, strip-frat, from-drat}")
   }
 }

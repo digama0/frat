@@ -12,3 +12,5 @@ debug = true
 [dependencies]
 byteorder = "1.4.2"
 arrayvec = "0.5.2"
+either = "1.6.1"
+rand = "0.8"
