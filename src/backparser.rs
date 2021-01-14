@@ -14,7 +14,7 @@ impl Iterator for VecBackParser {
     let (&n, most) = self.0.split_last()?;
     if n != 0 { panic!("expected 0 byte") }
     let i = most.iter().rposition(|&n| n == 0).map_or(0, |i| i + 1);
-    Some(Bin::segment(&mut self.0.drain(i..)))
+    Some(Bin.segment(&mut self.0.drain(i..)))
   }
 }
 
@@ -25,7 +25,7 @@ pub struct BackParser<M> {
   last_read: usize,
   buffers: Vec<Box<[u8]>>,
   free: Vec<Box<[u8]>>,
-  _mode: M,
+  mode: M,
 }
 
 impl<M> BackParser<M> {
@@ -42,7 +42,7 @@ impl<M> BackParser<M> {
       last_read: pos,
       buffers: vec![buf],
       free: Vec::new(),
-      _mode: mode
+      mode
     })
   }
 
@@ -60,11 +60,11 @@ impl<M> BackParser<M> {
 impl<M: Mode> BackParser<M> {
   fn parse_segment_from(&mut self, b: usize, i: usize) -> Segment {
     if b == 0 {
-      let res = M::segment(&mut self.buffers[0][i..self.pos].iter().copied());
+      let res = self.mode.segment(&mut self.buffers[0][i..self.pos].iter().copied());
       self.pos = i;
       res
     } else {
-      let res = M::segment(
+      let res = self.mode.segment(
         &mut self.buffers[b][i..].iter()
           .chain(self.buffers[1..b].iter().rev().flat_map(|buf| buf.iter()))
           .chain(self.buffers[0][..self.pos].iter()).copied());
@@ -93,12 +93,16 @@ impl<M: Mode> Iterator for BackParser<M> {
       if b == 0 {
         if self.pos != 0 {
           for i in (0..self.pos-1).rev() {
-            if M::back_scan(buf[i]) { return Some(self.parse_segment_from(b, i + M::OFFSET)) }
+            if self.mode.back_scan(buf[i]) {
+              return Some(self.parse_segment_from(b, i + self.mode.offset()))
+            }
           }
         }
       } else {
         for (i, &v) in buf.iter().enumerate().rev() {
-          if M::back_scan(v) { return Some(self.parse_segment_from(b, i + M::OFFSET)) }
+          if self.mode.back_scan(v) {
+            return Some(self.parse_segment_from(b, i + self.mode.offset()))
+          }
         }
       }
     }

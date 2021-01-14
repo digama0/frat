@@ -1,37 +1,36 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::marker::PhantomData;
 
 pub trait Mode: Default {
-  const OFFSET: usize;
-  const BIN: bool;
-  fn back_scan(c: u8) -> bool;
-  fn keyword(it: &mut impl Iterator<Item=u8>) -> Option<u8> { it.next() }
-  fn unum(it: &mut impl Iterator<Item=u8>) -> Option<u64>;
-  fn num(it: &mut impl Iterator<Item=u8>) -> Option<i64>;
+  fn offset(&self) -> usize;
+  fn bin(&self) -> bool;
+  fn back_scan(&self, c: u8) -> bool;
+  fn keyword(&self, it: &mut impl Iterator<Item=u8>) -> Option<u8> { it.next() }
+  fn unum(&self, it: &mut impl Iterator<Item=u8>) -> Option<u64>;
+  fn num(&self, it: &mut impl Iterator<Item=u8>) -> Option<i64>;
 
-  fn uvec(it: &mut impl Iterator<Item=u8>) -> Vec<u64> {
+  fn uvec(&self, it: &mut impl Iterator<Item=u8>) -> Vec<u64> {
     let mut vec = Vec::new();
-    loop { match Self::unum(it).expect("bad step") {
+    loop { match self.unum(it).expect("bad step") {
       0 => return vec,
       i => vec.push(i)
     } }
   }
 
-  fn ivec(it: &mut impl Iterator<Item=u8>) -> Vec<i64> {
+  fn ivec(&self, it: &mut impl Iterator<Item=u8>) -> Vec<i64> {
     let mut vec = Vec::new();
-    loop { match Self::num(it).expect("bad step") {
+    loop { match self.num(it).expect("bad step") {
       0 => return vec,
       i => vec.push(i)
     } }
   }
 
-  fn uvec2(it: &mut impl Iterator<Item=u8>) -> Vec<(u64, u64)> {
+  fn uvec2(&self, it: &mut impl Iterator<Item=u8>) -> Vec<(u64, u64)> {
     let mut vec = Vec::new();
     loop {
-      match Self::unum(it).expect("bad step") {
+      match self.unum(it).expect("bad step") {
         0 => return vec,
-        i => vec.push((i, match Self::unum(it) {
+        i => vec.push((i, match self.unum(it) {
           Some(j) if j != 0 => j,
           _ => panic!("odd relocation")
         }))
@@ -39,15 +38,15 @@ pub trait Mode: Default {
     }
   }
 
-  fn segment(it: &mut impl Iterator<Item=u8>) -> Segment {
-    match Self::keyword(it) {
-      Some(b'a') => Segment::Add(Self::unum(it).unwrap(), Self::ivec(it)),
-      Some(b'd') => Segment::Del(Self::unum(it).unwrap(), Self::ivec(it)),
-      Some(b'f') => Segment::Final(Self::unum(it).unwrap(), Self::ivec(it)),
-      Some(b'l') => Segment::LProof(Self::ivec(it)),
-      Some(b'o') => Segment::Orig(Self::unum(it).unwrap(), Self::ivec(it)),
-      Some(b'r') => Segment::Reloc(Self::uvec2(it)),
-      Some(b't') => Segment::Todo(Self::unum(it).unwrap()),
+  fn segment(&self, it: &mut impl Iterator<Item=u8>) -> Segment {
+    match self.keyword(it) {
+      Some(b'a') => Segment::Add(self.unum(it).unwrap(), self.ivec(it)),
+      Some(b'd') => Segment::Del(self.unum(it).unwrap(), self.ivec(it)),
+      Some(b'f') => Segment::Final(self.unum(it).unwrap(), self.ivec(it)),
+      Some(b'l') => Segment::LProof(self.ivec(it)),
+      Some(b'o') => Segment::Orig(self.unum(it).unwrap(), self.ivec(it)),
+      Some(b'r') => Segment::Reloc(self.uvec2(it)),
+      Some(b't') => Segment::Todo(self.unum(it).unwrap()),
       Some(k) => panic!("bad step {:?}", k as char),
       None => panic!("bad step None"),
     }
@@ -69,11 +68,11 @@ pub enum Segment {
 #[derive(Default)] pub struct Ascii;
 
 impl Mode for Bin {
-  const OFFSET: usize = 1;
-  const BIN: bool = true;
-  fn back_scan(c: u8) -> bool { c == 0 }
+  #[inline] fn offset(&self) -> usize {1}
+  #[inline] fn bin(&self) -> bool {true}
+  #[inline] fn back_scan(&self, c: u8) -> bool { c == 0 }
 
-  fn unum(it: &mut impl Iterator<Item=u8>) -> Option<u64> {
+  fn unum(&self, it: &mut impl Iterator<Item=u8>) -> Option<u64> {
     let mut res: u64 = 0;
     let mut mul: u8 = 0;
     for c in it {
@@ -87,8 +86,8 @@ impl Mode for Bin {
     None
   }
 
-  fn num(it: &mut impl Iterator<Item=u8>) -> Option<i64> {
-    Bin::unum(it).map(|ulit|
+  fn num(&self, it: &mut impl Iterator<Item=u8>) -> Option<i64> {
+    self.unum(it).map(|ulit|
       if ulit & 1 != 0 { -((ulit >> 1) as i64) }
       else { (ulit >> 1) as i64 })
   }
@@ -117,18 +116,36 @@ impl Ascii {
   }
 
 }
+
 impl Mode for Ascii {
-  const OFFSET: usize = 0;
-  const BIN: bool = false;
-  fn back_scan(c: u8) -> bool { c > b'9' }
-  fn keyword(it: &mut impl Iterator<Item=u8>) -> Option<u8> { Ascii::spaces(it) }
-  fn unum(it: &mut impl Iterator<Item=u8>) -> Option<u64> {
+  #[inline] fn offset(&self) -> usize {0}
+  #[inline] fn bin(&self) -> bool {false}
+  #[inline] fn back_scan(&self, c: u8) -> bool { c > b'9' }
+  fn keyword(&self, it: &mut impl Iterator<Item=u8>) -> Option<u8> { Ascii::spaces(it) }
+  fn unum(&self, it: &mut impl Iterator<Item=u8>) -> Option<u64> {
     Ascii::parse_num(Ascii::spaces(it), it)
   }
-  fn num(it: &mut impl Iterator<Item=u8>) -> Option<i64> {
+  fn num(&self, it: &mut impl Iterator<Item=u8>) -> Option<i64> {
     let (neg, peek) = Ascii::initial_neg(it);
     let val = Ascii::parse_num(peek, it)?;
     Some(if neg { -(val as i64) } else { val as i64 })
+  }
+}
+
+impl Mode for bool {
+  fn offset(&self) -> usize {if *self {Bin.offset()} else {Ascii.offset()}}
+  fn bin(&self) -> bool {*self}
+  fn back_scan(&self, c: u8) -> bool {
+    if *self {Bin.back_scan(c)} else {Ascii.back_scan(c)}
+  }
+  fn keyword(&self, it: &mut impl Iterator<Item=u8>) -> Option<u8> {
+    if *self {Bin.keyword(it)} else {Ascii.keyword(it)}
+  }
+  fn unum(&self, it: &mut impl Iterator<Item=u8>) -> Option<u64> {
+    if *self {Bin.unum(it)} else {Ascii.unum(it)}
+  }
+  fn num(&self, it: &mut impl Iterator<Item=u8>) -> Option<i64> {
+    if *self {Bin.num(it)} else {Ascii.num(it)}
   }
 }
 
@@ -139,10 +156,10 @@ pub fn detect_binary(f: &mut File) -> io::Result<bool> {
   Ok(c[0] == 0)
 }
 
-pub struct LRATParser<M, I>(I, PhantomData<M>);
+pub struct LRATParser<M, I> {mode: M, it: I}
 
 impl<M, I> LRATParser<M, I> {
-	pub fn from(_: M, it: I) -> Self { LRATParser(it, PhantomData) }
+	pub fn from(mode: M, it: I) -> Self { LRATParser {mode, it} }
 }
 
 #[derive(Debug)]
@@ -154,21 +171,21 @@ pub enum LRATStep {
 impl<M: Mode, I: Iterator<Item=u8>> Iterator for LRATParser<M, I> {
 	type Item = (u64, LRATStep);
 	fn next(&mut self) -> Option<(u64, LRATStep)> {
-		Some((M::unum(&mut self.0)?,
-      match M::keyword(&mut self.0)? {
-        b'd' => LRATStep::Del(M::ivec(&mut self.0)),
+		Some((self.mode.unum(&mut self.it)?,
+      match self.mode.keyword(&mut self.it)? {
+        b'd' => LRATStep::Del(self.mode.ivec(&mut self.it)),
         k => LRATStep::Add(
-          M::ivec(&mut Some(k).into_iter().chain(&mut self.0)),
-          M::ivec(&mut self.0))
+          self.mode.ivec(&mut Some(k).into_iter().chain(&mut self.it)),
+          self.mode.ivec(&mut self.it))
       }
     ))
 	}
 }
 
-pub struct DRATParser<M, I>(I, PhantomData<M>);
+pub struct DRATParser<M, I> {mode: M, it: I}
 
 impl<M, I> DRATParser<M, I> {
-	pub fn from(_: M, it: I) -> Self { DRATParser(it, PhantomData) }
+	pub fn from(mode: M, it: I) -> Self { DRATParser {mode, it} }
 }
 
 #[derive(Debug)]
@@ -180,16 +197,16 @@ pub enum DRATStep {
 impl<M: Mode, I: Iterator<Item=u8>> Iterator for DRATParser<M, I> {
 	type Item = DRATStep;
 	fn next(&mut self) -> Option<DRATStep> {
-    if M::BIN {
-      match M::keyword(&mut self.0)? {
-        b'd' => Some(DRATStep::Del(M::ivec(&mut self.0))),
-        b'a' => Some(DRATStep::Add(M::ivec(&mut self.0))),
+    if self.mode.bin() {
+      match self.mode.keyword(&mut self.it)? {
+        b'd' => Some(DRATStep::Del(self.mode.ivec(&mut self.it))),
+        b'a' => Some(DRATStep::Add(self.mode.ivec(&mut self.it))),
         k => panic!("bad keyword {}", k as char)
       }
     } else {
-      match M::keyword(&mut self.0)? {
-        b'd' => Some(DRATStep::Del(M::ivec(&mut self.0))),
-        k => Some(DRATStep::Add(M::ivec(&mut Some(k).iter().cloned().chain(&mut self.0))))
+      match self.mode.keyword(&mut self.it)? {
+        b'd' => Some(DRATStep::Del(self.mode.ivec(&mut self.it))),
+        k => Some(DRATStep::Add(self.mode.ivec(&mut Some(k).iter().cloned().chain(&mut self.it))))
       }
     }
 	}

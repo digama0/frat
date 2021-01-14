@@ -24,7 +24,7 @@ impl<I: Iterator<Item=u8>> Iterator for ProofIter<I> {
       k => panic!("incorrect step {:?}, is this not a binary file?", k) };
     let mut vec = Vec::new();
     loop {
-      match Bin::num(&mut self.0).expect("expected literal") {
+      match Bin.num(&mut self.0).expect("expected literal") {
         0 => return Some((k, vec.into())),
         lit => vec.push(lit)
       }
