@@ -674,18 +674,25 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
       let (_vars, cnf) = parse_dimacs_map(read_to_string(dimacs)?.bytes(),
         |mut c| {dedup_vec(&mut c); c.into()});
       println!("trimming...");
-      if let Some(lrat_file) = args.next() {
+      let (lrat_file, verify) = match args.next() {
+        Some(ref s) if s == "-v" => (None, true),
+        Some(lrat_file) => (Some(lrat_file), matches!(args.next(), Some(ref s) if s == "-v")),
+        _ => (None, false),
+      };
+      if let Some(lrat_file) = lrat_file {
         let mut lrat = BufWriter::new(File::create(&lrat_file)?);
         trim(&cnf, temp_read, &mut lrat)?;
         lrat.flush()?;
-        match args.next() {
-          Some(ref s) if s == "-v" => {
-            println!("verifying...");
-            check_lrat(Ascii, cnf, &lrat_file)?;
-            println!("VERIFIED");
-          }
-          _ => ()
+        if verify {
+          println!("verifying...");
+          let lrat = File::open(lrat_file)?;
+          check_lrat(Ascii, cnf, BufReader::new(lrat).bytes().map(Result::unwrap))?;
+          println!("VERIFIED");
         }
+      } else if verify {
+        let mut lrat = vec![];
+        trim(&cnf, temp_read, &mut lrat)?;
+        check_lrat(Ascii, cnf, lrat.into_iter())?;
       } else {
         trim(&cnf, temp_read, &mut io::sink())?;
       }
@@ -694,9 +701,8 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   }
 }
 
-fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat_file: &str) -> io::Result<()> {
-  let lrat = File::open(lrat_file)?;
-  let lp = LRATParser::from(mode, BufReader::new(lrat).bytes().map(Result::unwrap));
+fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8>) -> io::Result<()> {
+  let lp = LRATParser::from(mode, lrat);
   let mut ctx: Context = Context::new();
   let mut k = 0;
 
@@ -718,9 +724,9 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat_file: &str) -> io::Res
         // eprintln!("{}: {:?} {:?}", k, ls, p);
         if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
           let (init, rest) = p.split_at(start);
-          run_rat_step(&ls, &mut ctx, init, rest.split_first(), false);
+          run_rat_step(&ls, &mut ctx, init, rest.split_first(), true);
         } else {
-          run_rat_step(&ls, &mut ctx, &p, None, false);
+          run_rat_step(&ls, &mut ctx, &p, None, true);
         }
         if ls.is_empty() { return Ok(()) }
         ctx.insert(i, true, ls.into());
@@ -739,7 +745,8 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat_file: &str) -> io::Res
 pub fn lratchk(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   let dimacs = args.next().expect("missing input file");
   let (_vars, cnf) = parse_dimacs(read_to_string(dimacs)?.bytes());
-  check_lrat(Ascii, cnf, &args.next().expect("missing proof file"))
+  let lrat = File::open(args.next().expect("missing proof file"))?;
+  check_lrat(Ascii, cnf, BufReader::new(lrat).bytes().map(Result::unwrap))
 }
 
 fn refrat_pass(elab: File, w: &mut impl Write) -> io::Result<()> {
