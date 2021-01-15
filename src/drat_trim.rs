@@ -1,11 +1,11 @@
-use std::fmt::Display;
-use std::io::{self, Read, Write, Seek, SeekFrom, BufReader, Stdin};
+use std::{convert::TryInto, fmt::Display, io::StdinLock};
+use std::io::{self, Read, Write, Seek, SeekFrom, BufReader};
 use std::ops::{Deref, DerefMut};
 use std::fs::File;
 use std::mem;
 use std::time::Instant;
 use either::Either;
-use io::{BufWriter, stdout};
+use io::{BufRead, BufWriter, stdout};
 use crate::{dimacs, parser::{DRATParser, DRATStep}};
 
 const TIMEOUT: u64 = 40000;
@@ -56,8 +56,17 @@ fn get_hash(lits: &[i64]) -> usize {
   crate::perm_clause::get_clause_hash(lits).0 as u32 as usize % BIGINIT
 }
 
+#[derive(Copy, Clone)]
+struct ClauseId(usize);
+
+impl ClauseId {
+  fn new(id: usize, active: bool) -> Self { Self(id << 1 | active as usize) }
+  #[inline] fn id(self) -> usize { self.0 >> 1 }
+  #[inline] fn active(self) -> bool { self.0 & ACTIVE != 0 }
+}
+
 struct Clause {
-  id: usize,
+  ida: ClauseId,
   pivot: i64,
   maxdep: usize,
   lits: Vec<i64>,
@@ -65,12 +74,13 @@ struct Clause {
 
 impl Clause {
   fn as_ref(&self) -> ClauseRef<'_> {
-    ClauseRef {id: self.id, lits: &self.lits}
+    ClauseRef {ida: self.ida, lits: &self.lits}
   }
 
-  #[inline] fn active(&self) -> bool { self.id & ACTIVE != 0 }
-  #[inline] fn deactivate(&mut self) { self.id &= !ACTIVE }
-  #[inline] fn activate(&mut self) { self.id |= ACTIVE }
+  #[inline] fn id(&self) -> usize { self.ida.id() }
+  #[inline] fn active(&self) -> bool { self.ida.active() }
+  #[inline] fn deactivate(&mut self) { self.ida.0 &= !ACTIVE }
+  #[inline] fn activate(&mut self) { self.ida.0 |= ACTIVE }
 }
 
 impl Deref for Clause {
@@ -87,11 +97,11 @@ impl Display for Clause {
   }
 }
 
-struct ClauseRef<'a> {id: usize, lits: &'a [i64]}
+struct ClauseRef<'a> {ida: ClauseId, lits: &'a [i64]}
 
 impl<'a> Display for ClauseRef<'a> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "[{}] ", self.id)?;
+    write!(f, "[{}] ", self.ida.0)?;
     for &lit in self.lits { write!(f, "{} ", lit)? }
     write!(f, "0")
   }
@@ -105,6 +115,7 @@ impl Watch {
     Watch(idx << 1 | mask as usize)
   }
   fn clause(self) -> usize { self.0 >> 1 }
+  fn mark(&mut self) { self.0 |= ACTIVE }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -132,13 +143,43 @@ impl<R: Read> Read for TrackLen<R> {
     Ok(n)
   }
 }
+impl<R: BufRead> BufRead for TrackLen<R> {
+  fn fill_buf(&mut self) -> io::Result<&[u8]> {
+    self.0.fill_buf()
+  }
+
+  fn consume(&mut self, amt: usize) {
+    self.0.consume(amt);
+    self.1 += amt;
+  }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq)]
+struct Reason(usize);
+
+impl Reason {
+  const NONE: Self = Self(0);
+  #[inline] fn new(clause_id: usize) -> Self { Self(clause_id + 1) }
+  #[inline] fn get(self) -> Option<usize> { self.0.checked_sub(1) }
+}
+
+#[derive(Copy, Clone)]
+struct Dependency(i64);
+
+impl Dependency {
+  #[inline] fn pos(n: ClauseId) -> Dependency { Self(n.0.try_into().unwrap()) }
+  #[inline] fn neg(n: usize) -> Dependency { let m: i64 = n.try_into().unwrap(); Self(-m) }
+  #[inline] fn is_pos(self) -> bool { self.0 >= 0 }
+  #[inline] fn pos_clause(self) -> ClauseId { ClauseId(self.0 as usize) }
+
+}
 
 struct SolverOpts {
   /// prints the core lemmas to the file LEMMAS (LRAT format)
   lrat_file: Option<BufWriter<File>>,
   trace_file: Option<BufWriter<File>>,
   /// prints the active clauses to the file ACTIVE (DIMACS format)
-  active_file: Option<File>,
+  active_file: Option<BufWriter<File>>,
   /// time limit in seconds
   timeout: u64,
   mask: bool,
@@ -221,22 +262,21 @@ struct Solver {
   rat_mode: bool,
   rat_count: usize,
   num_active: usize,
-  lrat_table: Vec<LRATLine>,
+  lrat_table: Box<[Option<LRATLine>]>,
   num_lemmas: usize,
   rat_set: Vec<usize>,
   pre_rat: Vec<i64>,
-  deps: Vec<i64>,
+  deps: Vec<Dependency>,
   max_var: i64,
   prep: bool,
   current: usize,
   num_removed: usize,
-  time: usize,
+  time: ClauseId,
   num_vars: usize,
   num_clauses: usize,
   unit_stack: Vec<usize>,
-  reason: Box<[usize]>,
+  reason: Box<[Reason]>,
   num_resolve: usize,
-  lrat_lookup: Box<[usize]>,
   watch_list: Box<[Vec<Watch>]>,
   opt_proof: Vec<ProofStep>,
   formula: Vec<ProofStep>,
@@ -252,9 +292,13 @@ fn creating(s: &Option<String>, f: impl FnOnce(File) -> io::Result<()>) -> io::R
   if let Some(ref s) = s { f(File::create(s)?) } else {Ok(())}
 }
 
-macro_rules! mid {($self:ident.$arr:ident[$lit:expr]) => {
-  $self.$arr[($self.max_var as i64 + $lit) as usize]
-}}
+macro_rules! mid {
+  ($self:ident.$arr:ident[$lit:expr]) => {mid!($self, ($self.$arr)[$lit])};
+  ($self:ident, $arr:ident[$lit:expr]) => {mid!($self, ($arr)[$lit])};
+  ($self:expr, ($arr:expr)[$lit:expr]) => {
+    $arr[($self.max_var as i64 + $lit) as usize]
+  };
+}
 
 macro_rules! reason {($self:ident, $lit:expr) => { $self.reason[$lit.abs() as usize] }}
 
@@ -285,15 +329,14 @@ fn write_lit(f: &mut impl Write, lit: i64) -> io::Result<()> {
 }
 
 impl Solver {
-  #[inline] fn reason(&mut self, lit: i64) -> &mut usize {
+  #[inline] fn reason(&mut self, lit: i64) -> &mut Reason {
     &mut reason!(self, lit)
   }
 
   fn assign(&mut self, lit: i64) { assign!(self, lit) }
 
   #[inline] fn add_watch(&mut self, clause: usize, lit: i64) {
-    let m = self.mask;
-    mid!(self.watch_list[lit]).push(Watch::new(clause, m))
+    mid!(self.watch_list[lit]).push(Watch::new(clause, self.mask))
   }
 
   fn remove_watch(&mut self, clause: usize, lit: i64) {
@@ -317,7 +360,7 @@ impl Solver {
     while self.forced < self.false_stack.len() {
       let lit = self.false_stack.pop().unwrap();
       mid!(self.false_a[lit]) = Assign::Unassigned;
-      reason!(self, lit) = 0;
+      reason!(self, lit) = Reason::NONE;
     }
   }
 
@@ -335,7 +378,7 @@ impl Solver {
       let old = self.false_stack[self.forced];
       if self.verb { println!("c removing unit {} ({})", old, lit) }
       mid!(self.false_a[old]) = Assign::Unassigned;
-      *self.reason(old) = 0;
+      *self.reason(old) = Reason::NONE;
     }
     self.processed = self.forced;
     self.false_stack.truncate(self.forced);
@@ -344,24 +387,24 @@ impl Solver {
   fn mark_watch(&mut self, clause: usize, index: usize) {
     mid!(self.watch_list[self.db[clause][index]])
       .iter_mut().find(|w| w.clause() == clause)
-      .unwrap().0 |= ACTIVE;
+      .unwrap().mark();
   }
 
-  fn add_dependency(&mut self, dep: i64, forced: bool) {
+  fn add_dependency(&mut self, dep: Dependency) {
     if true || self.trace_file.is_some() || self.lrat_file.is_some() {
-      self.deps.push(dep << 1 | forced as i64);
+      self.deps.push(dep);
     }
   }
 
   fn mark_clause(&mut self, clause: usize, skip_index: usize, forced: bool) {
     self.num_resolve += 1;
-    let id = self.db[clause].id;
-    self.add_dependency((id >> 1) as i64, forced);
-    if id & ACTIVE == 0 {
+    let id = self.db[clause].ida;
+    self.add_dependency(Dependency::pos(ClauseId::new(id.id(), forced)));
+    if !id.active() {
       self.num_active += 1;
       self.db[clause].activate();
       match (self.opts.mode, self.db[clause].len() > 1) {
-        (Mode::BackwardUnsat, true) => self.opt_proof.push(ProofStep::add(clause)),
+        (Mode::BackwardUnsat, true) => self.opt_proof.push(ProofStep::del(clause)),
         (_, false) => return,
         _ => {}
       }
@@ -375,14 +418,14 @@ impl Solver {
 
   fn analyze(&mut self, clause: usize, skip_index: usize) {
     let mut assigned = self.false_stack.len();
-    self.mark_clause(clause, skip_index, self.forced < assigned);
+    self.mark_clause(clause, skip_index, assigned > self.forced);
     while let Some(lit) = pop_ext(&self.false_stack, &mut assigned) {
       let force = assigned < self.forced;
       match mid!(self.false_a[lit]) {
-        Assign::Mark => if let Some(cl) = self.reason(lit).checked_sub(1) {
+        Assign::Mark => if let Some(cl) = self.reason(lit).get() {
           self.mark_clause(cl, 1, force);
         },
-        Assign::Assumed if !self.rat_mode && self.reduce && self.lrat_file.is_none() => {
+        Assign::Assumed if !self.rat_mode && self.reduce => {
           self.num_removed += 1;
           let cl = &mut *self.db[self.current];
           let i = cl.iter().position(|&i| i == lit).unwrap();
@@ -390,28 +433,17 @@ impl Solver {
         }
         _ => {}
       }
-      if !force { *self.reason(lit) = 0 }
+      if !force { *self.reason(lit) = Reason::NONE }
       mid!(self.false_a[lit]) = force.into();
     }
     self.processed = self.forced;
     self.false_stack.truncate(self.forced);
   }
 
-  fn no_analyze(&mut self) {
-    for lit in self.false_stack.drain(self.forced..) {
-      reason!(self, lit) = 0;
-      mid!(self.false_a[lit]) = Assign::Unassigned;
-    }
-    for &lit in &self.false_stack {
-      mid!(self.false_a[lit]) = Assign::Assigned;
-    }
-    self.processed = self.forced;
-  }
-
-  fn propagate(&mut self, mark: bool) -> bool {
+  fn propagate(&mut self) -> bool {
     let mut check = 0;
     let mode = !self.prep;
-    let mut start = [self.processed, self.processed];
+    let mut start = [self.processed; 2];
     let mut prev: Option<(i64, (*mut Vec<Watch>, usize))> = None;
     'flip_check: loop {
       check ^= 1;
@@ -447,14 +479,13 @@ impl Solver {
           let lit2 = cl[0]; wi += 1;
           if !mid!(self.false_a[lit2]).assigned() {
             self.assign(lit2);
-            *self.reason(lit2) = index + 1;
+            *self.reason(lit2) = Reason::new(index);
             if check == 0 {
               start[0] -= 1;
               prev = Some((lit, (watch, wi)));
               continue 'flip_check
             }
-          } else if !mark { self.no_analyze(); return true }
-          else { self.analyze(index, 0); return true }
+          } else { self.analyze(index, 0); return true }
         }
       }
       if check == 0 {break}
@@ -466,15 +497,15 @@ impl Solver {
   fn propagate_units(&mut self) -> bool {
     while let Some(i) = self.pop_forced() {
       mid!(self.false_a[i]) = Assign::Assigned;
-      reason!(self, i) = 0;
+      reason!(self, i) = Reason::NONE;
     }
     self.processed = 0; self.false_stack.clear();
     for &c in &self.unit_stack {
       let lit = self.db[c][0];
-      reason!(self, lit) = c + 1;
+      reason!(self, lit) = Reason::new(c);
       assign!(self, lit);
     }
-    if self.propagate(true) {return true}
+    if self.propagate() {return true}
     self.forced = self.processed;
     false
   }
@@ -517,7 +548,7 @@ impl Solver {
   }
 
   fn print_lrat_line(&self, f: &mut impl Write, time: usize) -> io::Result<()> {
-    let l = &self.lrat_table[self.lrat_lookup[time]];
+    let l = self.lrat_table[time].as_ref().unwrap();
     if self.bin_output {
       f.write_all(b"a")?;
       write_lit(f, l.name)?;
@@ -584,19 +615,18 @@ impl Solver {
             if self.bin_output { write_lit(&mut f, 0)? }
             else { writeln!(f, "0")? }
           }
-          last_added = lemmas.id >> 1;
+          last_added = lemmas.id();
           self.print_lrat_line(&mut f, last_added)?;
-        } else if last_added == self.num_clauses {continue}
-        else if lemmas.len() <= 1 {continue}
-        else {
+        } else if last_added != self.num_clauses && lemmas.len() > 1 {
           if last_added != 0 {
             if self.bin_output { f.write_all(b"d")? }
             else { write!(f, "{} d ", last_added)? }
             last_added = 0;
           }
-          if self.bin_output { write_lit(&mut f, (lemmas.id >> 1) as i64)? }
-          else { write!(f, "{} ", lemmas.id >> 1)? }
+          if self.bin_output { write_lit(&mut f, lemmas.id() as i64)? }
+          else { write!(f, "{} ", lemmas.id())? }
         }
+        f.flush()?;
       }
       if last_added != self.num_clauses {
         if self.bin_output { write_lit(&mut f, 0)? }
@@ -620,8 +650,8 @@ impl Solver {
       for step in &self.formula {
         let clause = &self.db[step.clause()];
         if !clause.active() {
-          if self.opts.bin_output { write_lit(lrat, (clause.id >> 1) as i64)? }
-          else { write!(lrat, "{} ", clause.id >> 1)? }
+          if self.opts.bin_output { write_lit(lrat, clause.id() as i64)? }
+          else { write!(lrat, "{} ", clause.id())? }
         }
       }
       if self.opts.bin_output { write_lit(lrat, 0)? }
@@ -672,32 +702,31 @@ impl Solver {
   fn print_dependencies_file(&mut self, clause: Option<usize>, mode: bool) -> io::Result<()> {
     if let Some(f) = if mode {&mut self.opts.lrat_file} else {&mut self.opts.trace_file} {
       let db = &self.db;
-      self.lrat_lookup[clause.map_or(self.count, |c| db[c].id >> 1)] = self.lrat_table.len();
-      let name = (self.time >> 1) as i64;
-      let clause = if let Some(cl) = clause {
+      let time = clause.map_or(self.count, |c| db[c].id());
+      let (name, clause) = if let Some(cl) = clause {
         let cl = &db[cl];
         let mut sorted = cl.to_vec().into_boxed_slice();
         let reslit = cl.pivot;
         sorted.sort_by_key(|&lit| if lit == reslit {0} else {lit.abs()});
-        sorted
+        (self.time.id() as i64, sorted)
       } else {
-        Box::new([self.count as i64])
+        (self.count as i64, Box::new([]) as Box<[_]>)
       };
 
-      let chain = if self.deps.iter().all(|&step| step >= 0) {
-        self.deps.iter().rev().map(|&step| step >> 1).collect::<Box<[_]>>()
+      let chain = if self.deps.iter().all(|&step| step.is_pos()) {
+        self.deps.iter().rev().map(|&step| step.pos_clause().id() as i64).collect::<Box<[_]>>()
       } else {
         let mut chain = Vec::with_capacity(self.deps.len());
 
         // first print the preRAT units in order of becoming unit
         self.pre_rat.clear();
         let mut last = 0;
-        while let Some(next) = self.deps[last..].iter().position(|&step| step < 0) {
-          for &cls in self.deps[last..next].iter().rev() {
-            if cls & 1 != 0 {continue}
-            if !self.pre_rat.contains(&cls) {
-              self.pre_rat.push(cls);
-              chain.push(cls >> 1);
+        while let Some(next) = self.deps[last..].iter().position(|&step| step.is_pos()) {
+          for cls in self.deps[last..next].iter().rev().copied().map(Dependency::pos_clause) {
+            if cls.active() {continue}
+            if !self.pre_rat.contains(&(cls.0 as i64)) {
+              self.pre_rat.push(cls.0 as i64);
+              chain.push(cls.id() as i64);
             }
           }
           last = next + 1;
@@ -706,11 +735,11 @@ impl Solver {
         // print dependencies in order of becoming unit
         for &cls in self.deps.iter().rev() {
           if mode {
-            if cls & 1 != 0 {chain.push(cls >> 1)}
-          } else if cls > 0 {
-            if !self.pre_rat.contains(&cls) {
-              self.pre_rat.push(cls);
-              chain.push(cls >> 1);
+            if cls.pos_clause().active() {chain.push(cls.0 >> 1)}
+          } else if cls.is_pos() {
+            if !self.pre_rat.contains(&cls.0) {
+              self.pre_rat.push(cls.0);
+              chain.push(cls.0 >> 1);
             }
           }
         }
@@ -723,22 +752,22 @@ impl Solver {
         for &lit in &*clause {write!(f, "{} ", lit)?}; write!(f, "0 ")?;
         for &lit in &*chain {write!(f, "{} ", lit)?}; writeln!(f, "0")?;
       }
-      self.lrat_table.push(LRATLine {name, clause, chain})
+      self.lrat_table[time] = Some(LRATLine {name, clause, chain})
     }
     Ok(())
   }
 
   fn print_dependencies(&mut self, clause: Option<usize>) -> io::Result<()> {
     if let Some(idx) = clause {
-      let maxdep = self.deps.iter().copied().fold(0, i64::max) as usize;
-      assert!(maxdep < self.db[idx].id);
+      let maxdep = self.deps.iter().map(|dep| dep.0).fold(0, i64::max) as usize;
+      assert!(maxdep < self.db[idx].ida.0);
       self.db[idx].maxdep = maxdep;
     }
     self.print_dependencies_file(clause, false)?;
     self.print_dependencies_file(clause, true)
   }
 
-  fn check_rat(&mut self, pivot: i64, mark: bool) -> bool {
+  fn check_rat(&mut self, pivot: i64) -> bool {
     let mut rat_set = mem::take(&mut self.rat_set);
     rat_set.clear();
     // Loop over all literals to calculate resolution candidates
@@ -764,45 +793,46 @@ impl Solver {
     self.deps.clear();
     for &cl in rat_set.iter().rev() {
       let mut rat_cls = &self.db[cl];
-      let id = rat_cls.id;
+      let ida = rat_cls.ida;
       let mut blocked = None;
       if self.verb { println!("c RAT clause: {}", rat_cls) }
 
       for &lit in &**rat_cls {
         if lit != -pivot && !mid!(self.false_a[-lit]).assigned() {
-          let reason2 = reason!(self, lit);
-          if blocked.map_or(true, |(_, reason)| reason > reason2) {
-            blocked = Some((lit, reason2));
+          if let Some(reason2) = reason!(self, lit).get() {
+            if blocked.map_or(true, |(_, reason)| reason > reason2) {
+              blocked = Some((lit, reason2));
+            }
           }
         }
       }
 
       if let Some((blocked, reason)) = blocked {
         self.analyze(reason, 1);
-        *self.reason(blocked) = 0;
+        *self.reason(blocked) = Reason::NONE;
       } else {
         for i in 0..rat_cls.len() {
           let lit = rat_cls[i];
           if lit != -pivot && !mid!(self.false_a[-lit]).assigned() {
             self.assign(-lit);
-            *self.reason(lit) = 0;
+            *self.reason(lit) = Reason::NONE;
             rat_cls = &self.db[cl];
           }
         }
-        if !self.propagate(mark) {
+        if !self.propagate() {
           self.rat_set = rat_set;
           self.pop_all_forced();
           if self.verb { println!("c RAT check on pivot {} failed\n", pivot) }
           return false
         }
-        self.add_dependency(-(id as i64), true)
+        self.add_dependency(Dependency::neg(ida.0 | 1))
       }
     }
 
     true
   }
 
-  fn redundancy_check(&mut self, index: usize, sat: bool, size: usize, mark: bool) -> io::Result<bool> {
+  fn redundancy_check(&mut self, index: usize, sat: bool, size: usize) -> io::Result<bool> {
     let mut clause = &self.db[index];
     let reslit = clause.pivot;
     if self.verb { println!("c checking lemma ({}, {}) {}", size, reslit, clause) }
@@ -811,7 +841,7 @@ impl Solver {
 
     if sat {
       let reason = reason!(self, clause[0]);
-      self.db[reason].activate();
+      self.db[reason.get().unwrap()].activate();
       return Ok(true)
     }
 
@@ -826,18 +856,18 @@ impl Solver {
       }
       mid!(self.false_a[lit]) = Assign::Assumed;
       self.false_stack.push(lit);
-      reason!(self, lit) = 0;
+      reason!(self, lit) = Reason::NONE;
     }
 
     let indegree = self.num_resolve;
     self.current = index;
-    if self.propagate(mark) {
+    if self.propagate() {
       let prep = self.num_resolve - indegree <= 2;
       if prep != self.prep {
         self.prep = prep;
         if self.verb {
           println!("c [{}] preprocessing checking mode {}",
-            self.time, if prep {"on"} else {"off"})
+            self.time.0, if prep {"on"} else {"off"})
         }
       }
       if self.verb { println!("c lemma has RUP") }
@@ -855,7 +885,7 @@ impl Solver {
     self.rat_mode = true;
     self.forced = self.false_stack.len();
 
-    let mut success = self.check_rat(reslit, mark);
+    let mut success = self.check_rat(reslit);
     clause = &self.db[index];
     if !success {
       self.warn(|| println!(
@@ -863,7 +893,7 @@ impl Solver {
       for i in 0..size {
         let lit = clause[i];
         if lit == reslit {continue}
-        if self.check_rat(lit, mark) {
+        if self.check_rat(lit) {
           self.db[index].pivot = lit;
           success = true;
           break
@@ -883,7 +913,7 @@ impl Solver {
       return Ok(false)
     }
 
-    if mark { self.rat_count += 1 }
+    self.rat_count += 1;
     if self.verb { println!("c lemma has RAT on {}", self.db[index].pivot) }
     Ok(true)
   }
@@ -900,7 +930,7 @@ impl Solver {
     self.num_active = 0;
     self.unit_stack.clear();
     for i in 1..=self.max_var {
-      self.reason[i as usize] = 0;
+      self.reason[i as usize] = Reason::NONE;
       mid!(self.false_a[i]) = Assign::Unassigned;
       mid!(self.false_a[-i]) = Assign::Unassigned;
       mid!(self.watch_list[i]).clear();
@@ -940,7 +970,7 @@ impl Solver {
       }
     }
     self.deps.clear();
-    self.time = self.count; // Alternative time init
+    self.time = ClauseId(self.count); // Alternative time init
     if self.propagate_units() {
       println!("c UNSAT via unit propagation on the input instance");
       self.print_dependencies(None)?;
@@ -963,7 +993,7 @@ impl Solver {
         let ad = self.proof[step];
         let mut lemmas = &self.db[ad.clause()];
 
-        self.time = lemmas.id;
+        self.time = lemmas.ida;
         if ad.is_del() { active -= 1 }
         else { active += 1; adds += 1; }
         if matches!(self.mode, Mode::ForwardSat) && self.verb {
@@ -972,7 +1002,7 @@ impl Solver {
 
         if let [lit] = ***lemmas { // found a unit
           if self.verb {
-            println!("c found unit in proof {} [{}]", lit, self.time);
+            println!("c found unit in proof {} [{}]", lit, self.time.0);
           }
           if ad.is_del() {
             if let Mode::ForwardSat = self.mode {
@@ -992,7 +1022,7 @@ impl Solver {
 
         if ad.is_del() {
           if let [lit, lit2, ..] = ***lemmas { // if delete and not unit
-            if *self.reason(lit) == ad.clause() + 1 {
+            if *self.reason(lit) == Reason::new(ad.clause()) {
               if let Mode::ForwardSat = self.mode { // also for FORWARD_UNSAT?
                 self.remove_watch(ad.clause(), lit);
                 self.remove_watch(ad.clause(), lit2);
@@ -1016,7 +1046,7 @@ impl Solver {
         let (sat, size) = match (ad.is_del(), self.mode) {
           (true, Mode::ForwardSat) => {
             if sat { self.propagate_units(); }
-            if !self.redundancy_check(ad.clause(), sat, size, true)? {
+            if !self.redundancy_check(ad.clause(), sat, size)? {
               println!("c failed at proof line {} (modulo deletion errors)", step + 1);
               return Ok(VerifyResult::Fail)
             }
@@ -1024,7 +1054,7 @@ impl Solver {
           }
           (false, Mode::ForwardUnsat) if step >= end_incl => {
             if sat {continue} // bus error in drat-trim?
-            if !self.redundancy_check(ad.clause(), sat, size, true)? {
+            if !self.redundancy_check(ad.clause(), sat, size)? {
               println!("c failed at proof line {} (modulo deletion errors)", step + 1);
               return Ok(VerifyResult::Fail)
             }
@@ -1046,8 +1076,8 @@ impl Solver {
             let lit = self.db[ad.clause()][0];
             if self.verb { println!("c found unit {}", lit) }
             self.assign(lit);
-            *self.reason(lit) = ad.clause() + 1;
-            if self.propagate(true) { break 'start_verification step }
+            *self.reason(lit) = Reason::new(ad.clause());
+            if self.propagate() { break 'start_verification step }
             self.forced = self.processed;
           }
           _ => {}
@@ -1101,6 +1131,7 @@ impl Solver {
       Mode::BackwardUnsat => {}
     }
 
+    if !self.backforce { self.print_dependencies(None)? }
     println!("c detected empty clause; start verification via backward checking");
     self.forced = self.processed;
     self.opt_proof.clear();
@@ -1145,7 +1176,7 @@ impl Solver {
           [lit, lit2, ..] => {
             self.remove_watch(ad.clause(), lit);
             self.remove_watch(ad.clause(), lit2);
-            if *self.reason(lit) == ad.clause() + 1 {
+            if *self.reason(lit) == Reason::new(ad.clause()) {
               self.unassign_unit(lit)
             }
           }
@@ -1155,8 +1186,8 @@ impl Solver {
 
         let (sat, size) = self.sort_size(ad.clause());
         let clause = &mut self.db[ad.clause()];
-        self.time = clause.id;
-        if self.time & ACTIVE == 0 {
+        self.time = clause.ida;
+        if !self.time.active() {
           _skipped += 1;
           continue
         }
@@ -1167,7 +1198,7 @@ impl Solver {
         if self.opts.verb {
           println!("c validating clause ({}, {}):  {}", clause.pivot, size, clause);
         }
-        if !self.redundancy_check(ad.clause(), sat, size, true)? {
+        if !self.redundancy_check(ad.clause(), sat, size)? {
           println!("c failed at proof line {} (modulo deletion errors)", step + 1);
           return Ok(VerifyResult::Fail)
         }
@@ -1215,8 +1246,8 @@ impl Solver {
         let d = &mut self.db[b.clause()];
         let coinflip = false;
         // let coinflip = rng.gen();
-        if c.maxdep < d.maxdep || coinflip && c.maxdep < d.id {
-          mem::swap(&mut c.id, &mut d.id);
+        if c.maxdep < d.maxdep || coinflip && c.maxdep < d.ida.0 {
+          mem::swap(&mut c.ida, &mut d.ida);
           self.proof.swap(step, step - 1)
         }
       }
@@ -1232,38 +1263,36 @@ impl Solver {
     }
   }
 
-  fn parse(opts: SolverOpts, input_file: File, proof_file: impl Read) -> (bool, Self) {
+  fn parse(opts: SolverOpts, input_file: File, proof_file: impl BufRead) -> (bool, Self) {
     let mut unsat = false;
-    let (vars, clauses, input_file) =
+    let (num_vars, num_clauses, input_file) =
       dimacs::DimacsIter::from(BufReader::new(input_file).bytes().map(|c| c.unwrap()));
     let mut input_file = input_file.zip(1..);
-    let mut formula = Vec::with_capacity(clauses);
-    println!("c parsing input formula with {} variables and {} clauses", vars, clauses);
+    let mut formula = Vec::with_capacity(num_clauses);
+    println!("c parsing input formula with {} variables and {} clauses", num_vars, num_clauses);
     let mut db = Vec::with_capacity(BIGINIT);
     let mut proof = Vec::with_capacity(BIGINIT);
-    let mut hash_table: Vec<Vec<usize>> =
-      std::iter::repeat_with(|| Vec::with_capacity(INIT)).take(BIGINIT).collect();
+    let mut hash_table: Vec<Vec<usize>> = std::iter::repeat_with(Vec::new).take(BIGINIT).collect();
     let mut file_switch_flag = false;
-    let mut reader = BufReader::new(TrackLen::new(proof_file));
+    let mut reader = TrackLen::new(proof_file);
     let mut proof_file = DRATParser::from(opts.bin_mode, (&mut reader).bytes().map(|c| c.unwrap())).zip(1..);
     let mut active = 0;
     let mut max_var = 0;
-    let mut max_size = 0;
     let mut count = 1;
     let mut num_lemmas = 0;
     loop {
-      if !file_switch_flag { file_switch_flag |= formula.len() >= clauses }
+      if !file_switch_flag { file_switch_flag |= formula.len() >= num_clauses }
       let (line, del, mut lits) = if !file_switch_flag {
         let (clause, line) = if let Some(c) = input_file.next() {c} else {
           opts.warn(|| println!("\
             c WARNING: early EOF of the input formula\n\
-            c WARNING: {} clauses less than expected", clauses - formula.len()));
+            c WARNING: {} clauses less than expected", num_clauses - formula.len()));
           file_switch_flag = true;
           continue
         };
         for &lit in &clause {
-          assert!(lit.abs() <= vars as i64,
-            "illegal literal {} due to max var {}", lit, vars);
+          assert!(lit.abs() <= num_vars as i64,
+            "illegal literal {} due to max var {}", lit, num_vars);
         }
         (line, false, clause)
       } else {
@@ -1275,7 +1304,6 @@ impl Solver {
       };
       max_var = lits.iter().copied().fold(max_var, i64::max);
       let size = lits.len();
-      max_size = max_size.max(size);
       let pivot = lits.get(0).copied().unwrap_or(0);
       lits.sort();
       if lits.len() != {lits.dedup(); lits.len()} {
@@ -1286,7 +1314,7 @@ impl Solver {
       if del && matches!(opts.mode, Mode::BackwardUnsat) && size <= 1 {
         opts.warn(|| println!(
           "c WARNING: backward mode ignores deletion of (pseudo) unit clause {}",
-          ClauseRef {id: 0, lits: &lits}));
+          ClauseRef {ida: ClauseId(0), lits: &lits}));
         continue
       }
       let hash = get_hash(&lits);
@@ -1299,19 +1327,17 @@ impl Solver {
           } else {
             opts.warn(|| println!(
               "c WARNING: deleted clause on line {} does not occur: {}",
-              line, ClauseRef {id: 0, lits: &lits}));
+              line, ClauseRef {ida: ClauseId(0), lits: &lits}));
           }
         }
       } else {
-        let id = count << 1 |
-          if matches!(opts.mode, Mode::ForwardSat) &&
-            formula.len() < clauses {ACTIVE} else {0};
+        let ida = ClauseId::new(count, matches!(opts.mode, Mode::ForwardSat) && formula.len() < num_clauses);
         count += 1;
         let idx = db.len();
-        db.push(Clause {id, lits, pivot, maxdep: 0});
+        db.push(Clause {ida, lits, pivot, maxdep: 0});
         hash_table[hash].push(idx);
         active += 1;
-        if formula.len() < clauses {
+        if formula.len() < num_clauses {
           formula.push(ProofStep::add(idx));
         } else {
           proof.push(ProofStep::add(idx));
@@ -1333,27 +1359,25 @@ impl Solver {
     }
     db.shrink_to_fit();
 
-    println!("c finished parsing, read {} bytes from proof file",
-      reader.into_inner().bytes_read());
+    println!("c finished parsing, read {} bytes from proof file", reader.bytes_read());
     let n = max_var as usize;
     (unsat, Self {
       opts,
       count,
       db,
-      num_vars: vars,
-      num_clauses: clauses,
+      num_vars,
+      num_clauses,
       max_var,
       num_lemmas,
       formula,
       proof,
       false_stack: Vec::with_capacity(n + 1),
-      reason: vec![0; n + 1].into(),
+      reason: vec![Reason::NONE; n + 1].into(),
       false_a: vec![Assign::Unassigned; 2 * n + 1].into(),
-      opt_proof: Vec::with_capacity(2 * num_lemmas + clauses),
+      opt_proof: Vec::with_capacity(2 * num_lemmas + num_clauses),
       rat_set: Vec::with_capacity(INIT),
       pre_rat: Vec::with_capacity(n),
-      lrat_table: Vec::with_capacity(INIT),
-      lrat_lookup: vec![0; count + 1].into(),
+      lrat_table: std::iter::repeat_with(|| None).take(count + 1).collect(),
       deps: Vec::with_capacity(INIT),
       watch_list: std::iter::repeat_with(|| Vec::with_capacity(INIT)).take(2 * n + 1).collect(),
       unit_stack: Vec::with_capacity(n),
@@ -1365,7 +1389,7 @@ impl Solver {
       rat_mode: false,
       rat_count: 0,
       num_resolve: 0,
-      time: 0,
+      time: ClauseId(0),
       current: 0,
     })
   }
@@ -1409,14 +1433,15 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   // input file in DIMACS format
   let mut input_file: Option<File> = None;
   // proof file in DRAT format (stdin if no argument)
-  let mut proof_file: Either<Stdin, File> = Either::Left(io::stdin());
+  let stdin = io::stdin();
+  let mut proof_file: Either<StdinLock, BufReader<File>> = Either::Left(stdin.lock());
   let mut proof_str = None;
   while let Some(arg) = args.next() {
     if arg.starts_with("-") {
       match &arg[1..] {
         "h" => print_help(),
         "c" => opts.core_str = Some(args.next().expect("expected -c CORE")),
-        "a" => opts.active_file = Some(File::create(args.next().expect("expected -a ACTIVE"))?),
+        "a" => opts.active_file = Some(BufWriter::new(File::create(args.next().expect("expected -a ACTIVE"))?)),
         "l" => opts.lemma_str = Some(args.next().expect("expected -l LEMMAS")),
         "L" => opts.lrat_file = Some(BufWriter::new(File::create(args.next().expect("expected -L LEMMAS"))?)),
         "r" => opts.trace_file = Some(BufWriter::new(File::create(args.next().expect("expected -r TRACE"))?)),
@@ -1465,7 +1490,7 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
             println!("c turning on binary mode checking");
             opts.bin_mode = true;
           }
-          proof_file = Either::Right(File::open(&arg)?);
+          proof_file = Either::Right(BufReader::new(File::open(&arg)?));
           proof_str = Some(arg);
         }
         _ => {}
@@ -1476,8 +1501,8 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   if proof_file.is_left() {
     println!("c reading proof from stdin")
   }
+  opts.reduce &= opts.lrat_file.is_none() && !matches!(opts.mode, Mode::ForwardUnsat);
   let (mut unsat, mut s) = Solver::parse(opts, input_file, proof_file);
-  if matches!(s.mode, Mode::ForwardUnsat) {s.opts.reduce = false}
   if let Some(proof) = proof_str.filter(|_| s.del_proof) {
     std::fs::remove_file(&proof)?;
     println!("c deleted proof {}", proof);
