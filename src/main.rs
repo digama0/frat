@@ -2,6 +2,7 @@ mod dimacs;
 mod parser;
 mod backparser;
 mod perm_clause;
+mod midvec;
 mod elab;
 mod fratchk;
 mod dratchk;

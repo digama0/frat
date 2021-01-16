@@ -6,7 +6,7 @@ use std::mem;
 use std::time::Instant;
 use either::Either;
 use io::{BufRead, BufWriter, stdout};
-use crate::{dimacs, parser::{DRATParser, DRATStep}};
+use crate::{dimacs, midvec::MidVec, parser::{DRATParser, DRATStep}};
 
 const TIMEOUT: u64 = 40000;
 const INIT: usize = 4;
@@ -43,6 +43,9 @@ enum Assign {
   Mark,
 }
 
+impl Default for Assign {
+  fn default() -> Self { Self::Unassigned }
+}
 impl Assign {
   #[inline] fn assigned(self) -> bool { !matches!(self, Assign::Unassigned) }
 }
@@ -255,7 +258,7 @@ struct Solver {
   opts: SolverOpts,
   db: Vec<Clause>,
   false_stack: Vec<i64>,
-  false_a: Box<[Assign]>,
+  false_a: MidVec<Assign>,
   forced: usize,
   processed: usize,
   count: usize,
@@ -277,7 +280,7 @@ struct Solver {
   unit_stack: Vec<usize>,
   reason: Box<[Reason]>,
   num_resolve: usize,
-  watch_list: Box<[Vec<Watch>]>,
+  watch_list: MidVec<Vec<Watch>>,
   opt_proof: Vec<ProofStep>,
   formula: Vec<ProofStep>,
   proof: Vec<ProofStep>,
@@ -292,19 +295,11 @@ fn creating(s: &Option<String>, f: impl FnOnce(File) -> io::Result<()>) -> io::R
   if let Some(ref s) = s { f(File::create(s)?) } else {Ok(())}
 }
 
-macro_rules! mid {
-  ($self:ident.$arr:ident[$lit:expr]) => {mid!($self, ($self.$arr)[$lit])};
-  ($self:ident, $arr:ident[$lit:expr]) => {mid!($self, ($arr)[$lit])};
-  ($self:expr, ($arr:expr)[$lit:expr]) => {
-    $arr[($self.max_var as i64 + $lit) as usize]
-  };
-}
-
 macro_rules! reason {($self:ident, $lit:expr) => { $self.reason[$lit.abs() as usize] }}
 
 macro_rules! assign {($self:ident, $lit:expr) => {{
   let lit = $lit;
-  mid!($self.false_a[-lit]) = Assign::Assigned;
+  $self.false_a[-lit] = Assign::Assigned;
   $self.false_stack.push(-lit);
 }}}
 
@@ -336,11 +331,11 @@ impl Solver {
   fn assign(&mut self, lit: i64) { assign!(self, lit) }
 
   #[inline] fn add_watch(&mut self, clause: usize, lit: i64) {
-    mid!(self.watch_list[lit]).push(Watch::new(clause, self.mask))
+    self.watch_list[lit].push(Watch::new(clause, self.opts.mask))
   }
 
   fn remove_watch(&mut self, clause: usize, lit: i64) {
-    let watch = &mut mid!(self.watch_list[lit]);
+    let watch = &mut self.watch_list[lit];
     if watch.len() > INIT && watch.capacity() > 2 * watch.len() {
       shrink_vec(watch, 3 * watch.len() >> 1);
     }
@@ -359,7 +354,7 @@ impl Solver {
   fn pop_all_forced(&mut self) {
     while self.forced < self.false_stack.len() {
       let lit = self.false_stack.pop().unwrap();
-      mid!(self.false_a[lit]) = Assign::Unassigned;
+      self.false_a[lit] = Assign::Unassigned;
       reason!(self, lit) = Reason::NONE;
     }
   }
@@ -373,11 +368,11 @@ impl Solver {
 
   fn unassign_unit(&mut self, lit: i64) {
     if self.verb { println!("c removing unit {}", lit) }
-    while mid!(self.false_a[-lit]).assigned() {
+    while self.false_a[-lit].assigned() {
       self.forced = self.forced.checked_sub(1).unwrap();
       let old = self.false_stack[self.forced];
       if self.verb { println!("c removing unit {} ({})", old, lit) }
-      mid!(self.false_a[old]) = Assign::Unassigned;
+      self.false_a[old] = Assign::Unassigned;
       *self.reason(old) = Reason::NONE;
     }
     self.processed = self.forced;
@@ -385,7 +380,7 @@ impl Solver {
   }
 
   fn mark_watch(&mut self, clause: usize, index: usize) {
-    mid!(self.watch_list[self.db[clause][index]])
+    self.watch_list[self.db[clause][index]]
       .iter_mut().find(|w| w.clause() == clause)
       .unwrap().mark();
   }
@@ -412,7 +407,7 @@ impl Solver {
       self.mark_watch(clause, 1);
     }
     for &lit in &self.db[clause][skip_index..] {
-      mid!(self.false_a[lit]) = Assign::Mark
+      self.false_a[lit] = Assign::Mark
     }
   }
 
@@ -421,7 +416,7 @@ impl Solver {
     self.mark_clause(clause, skip_index, assigned > self.forced);
     while let Some(lit) = pop_ext(&self.false_stack, &mut assigned) {
       let force = assigned < self.forced;
-      match mid!(self.false_a[lit]) {
+      match self.false_a[lit] {
         Assign::Mark => if let Some(cl) = self.reason(lit).get() {
           self.mark_clause(cl, 1, force);
         },
@@ -434,7 +429,7 @@ impl Solver {
         _ => {}
       }
       if !force { *self.reason(lit) = Reason::NONE }
-      mid!(self.false_a[lit]) = force.into();
+      self.false_a[lit] = force.into();
     }
     self.processed = self.forced;
     self.false_stack.truncate(self.forced);
@@ -451,7 +446,7 @@ impl Solver {
         start[check] += 1;
         let (watch, mut wi) = match prev {
           Some((_lit, _watch)) if lit == _lit => _watch,
-          _ => (&mut mid!(self.watch_list[lit]) as *mut _, 0),
+          _ => (&mut self.watch_list[lit] as *mut _, 0),
         };
         // SAFETY: The borrow of self.watch_list[lit] here is disjoint from
         // the borrow of self.watch_list[ci] below because lit != ci
@@ -462,22 +457,22 @@ impl Solver {
           let index = w.clause();
           let cl = &mut *self.db[index];
           let (a, b) = if let [a, b, ..] = **cl {(a, b)} else {panic!()};
-          if mid!(self.false_a[-a]).assigned() ||
-             mid!(self.false_a[-b]).assigned() {
+          if self.false_a[-a].assigned() ||
+             self.false_a[-b].assigned() {
             wi += 1; continue
           }
           if a == lit {cl.swap(0, 1)}
           for i in 2..cl.len() {
             let ci = cl[i];
-            if !mid!(self.false_a[ci]).assigned() {
+            if !self.false_a[ci].assigned() {
               cl.swap(1, i);
               debug_assert!(lit != ci);
-              mid!(self.watch_list[ci]).push(watch.swap_remove(wi));
+              self.watch_list[ci].push(watch.swap_remove(wi));
               continue 'next_clause
             }
           }
           let lit2 = cl[0]; wi += 1;
-          if !mid!(self.false_a[lit2]).assigned() {
+          if !self.false_a[lit2].assigned() {
             self.assign(lit2);
             *self.reason(lit2) = Reason::new(index);
             if check == 0 {
@@ -496,7 +491,7 @@ impl Solver {
 
   fn propagate_units(&mut self) -> bool {
     while let Some(i) = self.pop_forced() {
-      mid!(self.false_a[i]) = Assign::Assigned;
+      self.false_a[i] = Assign::Assigned;
       reason!(self, i) = Reason::NONE;
     }
     self.processed = 0; self.false_stack.clear();
@@ -518,8 +513,8 @@ impl Solver {
     let mut sat = false;
     for last in 0..lemma.len() {
       let lit = lemma[last];
-      if !mid!(self.false_a[lit]).assigned() {
-        sat |= mid!(self.false_a[-lit]).assigned();
+      if !self.false_a[lit].assigned() {
+        sat |= self.false_a[-lit].assigned();
         lemma.swap(last, size);
         size += 1;
       }
@@ -678,7 +673,7 @@ impl Solver {
   fn print_active(&mut self) -> io::Result<()> {
     if let Some(active) = &mut self.opts.active_file {
       for lit in (-self.max_var..=self.max_var).filter(|&i| i != 0) {
-        for &w in &mid!(self.watch_list[lit]) {
+        for &w in &self.watch_list[lit] {
           let clause = &**self.db[w.clause()];
           if clause[0] == lit {
             for i in clause {write!(active, "{} ", i)?}
@@ -773,7 +768,7 @@ impl Solver {
     // Loop over all literals to calculate resolution candidates
     for i in (-self.max_var..=self.max_var).filter(|&i| i != 0) {
       // Loop over all watched clauses for literal
-      for &w in &mid!(self.watch_list[i]) {
+      for &w in &self.watch_list[i] {
         let watched = &self.db[w.clause()];
         if watched[0] == i && // If watched literal is in first position
           watched.contains(&-pivot) {
@@ -798,7 +793,7 @@ impl Solver {
       if self.verb { println!("c RAT clause: {}", rat_cls) }
 
       for &lit in &**rat_cls {
-        if lit != -pivot && !mid!(self.false_a[-lit]).assigned() {
+        if lit != -pivot && !self.false_a[-lit].assigned() {
           if let Some(reason2) = reason!(self, lit).get() {
             if blocked.map_or(true, |(_, reason)| reason > reason2) {
               blocked = Some((lit, reason2));
@@ -813,7 +808,7 @@ impl Solver {
       } else {
         for i in 0..rat_cls.len() {
           let lit = rat_cls[i];
-          if lit != -pivot && !mid!(self.false_a[-lit]).assigned() {
+          if lit != -pivot && !self.false_a[-lit].assigned() {
             self.assign(-lit);
             *self.reason(lit) = Reason::NONE;
             rat_cls = &self.db[cl];
@@ -848,13 +843,13 @@ impl Solver {
     self.rat_mode = false;
     self.deps.clear();
     for &lit in &clause[..size] {
-      if mid!(self.false_a[-lit]).assigned() { // should only occur in forward mode
+      if self.false_a[-lit].assigned() { // should only occur in forward mode
         self.warn(|| println!(
           "c WARNING: found a tautological clause in proof: {}", clause));
         self.pop_all_forced();
         return Ok(true)
       }
-      mid!(self.false_a[lit]) = Assign::Assumed;
+      self.false_a[lit] = Assign::Assumed;
       self.false_stack.push(lit);
       reason!(self, lit) = Reason::NONE;
     }
@@ -879,7 +874,7 @@ impl Solver {
     // println!("RUP check failed.  Starting RAT check.");
     if self.verb { println!("c RUP check failed; starting RAT check on pivot {}.\n", reslit) }
 
-    if mid!(self.false_a[reslit]).assigned() {return Ok(false)}
+    if self.false_a[reslit].assigned() {return Ok(false)}
 
     let forced = self.forced;
     self.rat_mode = true;
@@ -931,10 +926,10 @@ impl Solver {
     self.unit_stack.clear();
     for i in 1..=self.max_var {
       self.reason[i as usize] = Reason::NONE;
-      mid!(self.false_a[i]) = Assign::Unassigned;
-      mid!(self.false_a[-i]) = Assign::Unassigned;
-      mid!(self.watch_list[i]).clear();
-      mid!(self.watch_list[-i]).clear();
+      self.false_a[i] = Assign::Unassigned;
+      self.false_a[-i] = Assign::Unassigned;
+      self.watch_list[i].clear();
+      self.watch_list[-i].clear();
     }
     for i in 0..self.formula.len() {
       let c = self.formula[i].clause();
@@ -951,7 +946,7 @@ impl Solver {
           self.add_watch(c, i);
           self.add_watch(c, j);
         }
-        [i] => if mid!(self.false_a[i]).assigned() {
+        [i] => if self.false_a[i].assigned() {
           println!("c found complementary unit clauses: {}", i);
           creating(&self.core_str, |mut f|
             writeln!(f, "p cnf {} 2\n{} 0\n{} 0", i.abs(), i, -i))?;
@@ -963,7 +958,7 @@ impl Solver {
             writeln!(lrat, "{} 0 {} {} 0", self.num_clauses + 1, j + 1, i + 1)?;
           }
           return Ok(true)
-        } else if !mid!(self.false_a[-i]).assigned() {
+        } else if !self.false_a[-i].assigned() {
           self.add_unit(c);
           self.assign(i);
         }
@@ -1013,7 +1008,7 @@ impl Solver {
               self.proof[step] = ProofStep::NULL;
               continue
             }
-          } else if matches!(self.mode, Mode::BackwardUnsat) && mid!(self.false_a[-lit]).assigned() {
+          } else if matches!(self.mode, Mode::BackwardUnsat) && self.false_a[-lit].assigned() {
             self.proof[step] = ProofStep::NULL;
             continue
           } else { self.add_unit(ad.clause()) }
@@ -1373,13 +1368,13 @@ impl Solver {
       proof,
       false_stack: Vec::with_capacity(n + 1),
       reason: vec![Reason::NONE; n + 1].into(),
-      false_a: vec![Assign::Unassigned; 2 * n + 1].into(),
+      false_a: MidVec::with_capacity(max_var),
       opt_proof: Vec::with_capacity(2 * num_lemmas + num_clauses),
       rat_set: Vec::with_capacity(INIT),
       pre_rat: Vec::with_capacity(n),
       lrat_table: std::iter::repeat_with(|| None).take(count + 1).collect(),
       deps: Vec::with_capacity(INIT),
-      watch_list: std::iter::repeat_with(|| Vec::with_capacity(INIT)).take(2 * n + 1).collect(),
+      watch_list: MidVec::with_capacity_by(max_var, || Vec::with_capacity(INIT)),
       unit_stack: Vec::with_capacity(n),
       prep: false,
       num_removed: 0,
