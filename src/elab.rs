@@ -15,6 +15,9 @@ use super::parser::{detect_binary, Step, StepRef, ElabStep, Segment,
 use super::backparser::{VecBackParser, BackParser, StepIter, ElabStepIter};
 use super::perm_clause::*;
 
+// Set this to true to get an error log when unit propagation fails
+const LOG_UNIT_PROP_ERROR: bool = false;
+
 #[derive(Default)]
 struct VAssign {
   tru_lits: MidVec<bool>,
@@ -98,7 +101,7 @@ struct Context {
   max_var: i64,
   clauses: Slab<Clause>,
   names: HashMap<u64, usize>,
-  units: HashMap<i64, usize>,
+  units: HashMap<usize, i64>,
   watch: Option<MidVec<Vec<usize>>>,
   step: Option<u64>
 }
@@ -155,7 +158,7 @@ impl Context {
       "at {:?}: Clause {} to be inserted already exists", self.step, name);
     match *self.clauses[i].lits {
       [] => {}
-      [l] => { self.units.insert(l, i); }
+      [l] => { self.units.insert(i, l); }
       [l1, l2, ..] => if let Some(w) = &mut self.watch {
         add_watch(w, l1, i);
         add_watch(w, l2, i);
@@ -171,7 +174,7 @@ impl Context {
 
     match *clause {
       [] => {}
-      [l] => { self.units.remove(&l); }
+      [_] => { self.units.remove(&i); }
       [l1, l2, ..] => if let Some(w) = &mut self.watch {
         del_watch(w, l1, i, &self.clauses);
         del_watch(w, l2, i, &self.clauses);
@@ -241,23 +244,18 @@ fn propagate(c: &[i64], ctx: &mut Context, Propagate {ls, va, steps}: &mut Propa
   steps.clear();
   va.reserve_clear(ctx.max_var);
 
-  macro_rules! assign {
-    ($l:expr; $reason:expr) => {{
-      if !va.assign($l, $reason) { return true }
-    }};
-    ($l:expr, $i:expr) => {assign!($l; (Some(steps.len()), steps.push($i)).0)};
-  }
+  macro_rules! push {($i:expr) => {(steps.len(), steps.push($i)).0}}
 
   for l in c {
     ls[0].push_back(-l);
     ls[1].push_back(-l);
-    assign!(-l; None);
+    if !va.assign(-l, None) { return true }
   }
 
-  for (&l, &i) in &ctx.units {
+  for (&i, &l) in &ctx.units {
     ls[0].push_back(l);
     ls[1].push_back(l);
-    assign!(l, i);
+    if !va.assign(l, Some(push!(i))) { return true }
   }
 
   let watch = init_watch(&mut ctx.watch, ctx.max_var, &ctx.clauses);
@@ -319,8 +317,11 @@ fn propagate(c: &[i64], ctx: &mut Context, Propagate {ls, va, steps}: &mut Propa
       // have a new unit, or if k is falsified then we proved false and can finish.
       let k = cl[0];
 
-      // Push the new unit on the chain; if we find a contradiction then exit here
-      assign!(k, i);
+      // Push the new unit on the chain
+      if !va.assign(k, Some(push!(i))) {
+        // if we find a contradiction then exit
+        return true
+      }
 
       // Otherwise, put k on the work lists and go to the next clause.
       ls[0].push_back(k);
@@ -329,34 +330,48 @@ fn propagate(c: &[i64], ctx: &mut Context, Propagate {ls, va, steps}: &mut Propa
   }
 
   // If there are no more literals to propagate, unit propagation has failed
-  // let _ = propagate_stuck(ctx, &ht, ls, va, c);
-  // panic!("Unit propagation stuck, cannot add clause {:?}", c)
-  va.clear();
+  if LOG_UNIT_PROP_ERROR {
+    let _ = propagate_stuck(ctx, va, steps, c);
+    panic!("Unit propagation stuck, cannot add clause {:?}", c)
+  }
   false
 }
 
-// fn propagate_stuck(ctx: &Context, ht: &Hint, ls: &[VecDeque<i64>; 2], va: &VAssign, c: &[i64]) -> io::Result<()> {
-//   // If unit propagation is stuck, write an error log
-//   let mut log = BufWriter::new(File::create("unit_prop_error.log")?);
-//   writeln!(log, "Clauses available at failure ((l) means false, [l] means true):")?;
-//   for (addr, c) in &ctx.clauses {
-//     write!(log, "{:?}: {} = ", addr, c.name)?;
-//     let mut sat = false;
-//     for lit in c {
-//       match va.val(lit) {
-//         None => write!(log, "{} ", lit)?,
-//         Some(true) => {write!(log, "[{}] ", lit)?; sat = true},
-//         Some(false) => write!(log, "({}) ", lit)?,
-//       }
-//     }
-//     writeln!(log, "{}", if sat {" (satisfied)"} else {""})?;
-//   }
-//   writeln!(log, "\nDiscovered reasons at failure: {:?}", ht.reasons)?;
-//   writeln!(log, "\nRecorded steps at failure: {:?}", ht.steps)?;
-//   writeln!(log, "\nObtained unit literals at failure: {:?}", ls)?;
-//   writeln!(log, "\nFailed to add clause: {:?}", c)?;
-//   log.flush()
-// }
+#[allow(unused)]
+fn propagate_stuck(ctx: &Context, va: &VAssign, steps: &[usize], c: &[i64]) -> io::Result<()> {
+  // If unit propagation is stuck, write an error log
+  let mut log = BufWriter::new(File::create("unit_prop_error.log")?);
+  writeln!(log, "Clauses available at failure ((l) means false, [l] means true):")?;
+  for (addr, c) in &ctx.clauses {
+    write!(log, "{:?}: {} = ", addr, c.name)?;
+    let mut sat = false;
+    let mut lits = 0;
+    for lit in c {
+      if va.is_true(lit) { write!(log, "[{}] ", lit)?; sat = true }
+      else if va.is_false(lit) { write!(log, "({}) ", lit)? }
+      else { lits += 1; write!(log, "{} ", lit)? }
+    }
+    if let [l] = **c {
+      if ctx.units.get(&addr) != Some(&l) {
+        write!(log, " (BUG: untracked unit clause)")?
+      }
+    }
+    writeln!(log, "{}", match (sat, lits) {
+      (true, _) => " (satisfied)",
+      (_, 0) => " (BUG: undetected falsified clause)",
+      (_, 1) => " (BUG: undetected unit clause)",
+      _ => ""
+    })?;
+  }
+  writeln!(log, "\nRecorded steps at failure: {:?}", steps)?;
+  writeln!(log, "\nObtained unit literals at failure:")?;
+  for &lit in &va.tru_stack {
+    assert!(va.is_true(lit));
+    writeln!(log, "{}: {:?}", lit, va.reasons[lit].map(|i| steps[i]))?;
+  }
+  writeln!(log, "\nFailed to add clause: {:?}", c)?;
+  log.flush()
+}
 
 fn propagate_hint(ls: &[i64], ctx: &mut Context, is: &[i64], strict: bool,
     Propagate {va, steps, ..}: &mut Propagate) -> bool {
@@ -729,9 +744,11 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
           println!("VERIFIED");
         }
       } else if verify {
+        println!("verifying...");
         let mut lrat = vec![];
         trim(&cnf, temp_read, &mut lrat)?;
         check_lrat(Ascii, cnf, lrat.into_iter())?;
+        println!("VERIFIED");
       } else {
         trim(&cnf, temp_read, &mut io::sink())?;
       }
