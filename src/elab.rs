@@ -145,9 +145,6 @@ fn init_watch<'a, 'b>(w: &'a mut Option<MidVec<Vec<usize>>>, max_var: i64, cl: &
 }
 
 impl Context {
-
-  fn new() -> Context { Default::default() }
-
   fn insert(&mut self, name: u64, marked: bool, lits: Box<[i64]>) {
     for &lit in &*lits {
       self.max_var = self.max_var.max(lit.abs())
@@ -225,279 +222,282 @@ impl PStep {
 }
 
 #[derive(Default)]
-struct Propagate {
+struct Solver {
+  ctx: Context,
   ls: [VecDeque<i64>; 2],
   va: VAssign,
   steps: Vec<PStep>,
 }
 
-impl Propagate {
-  fn minimized_hint(&mut self, ctx: &Context) -> Vec<i64> {
-    self.steps.last_mut().unwrap_or_else(
+impl Solver {
+  fn minimized_hint(&mut self) -> Vec<i64> {
+    let Self {steps, ctx, va, ..} = self;
+    steps.last_mut().unwrap_or_else(
       || panic!("at {:?}: minimizing empty hint", ctx.step)).mark();
 
-    for i in (0..self.steps.len()).rev() {
-      let s = self.steps[i];
+    for i in (0..steps.len()).rev() {
+      let s = steps[i];
       if s.marked() {
         for &l in &*ctx.clauses[s.clause()] {
-          if let Some(j) = self.va.reasons[-l] {self.steps[j].mark()}
+          if let Some(j) = va.reasons[-l] {steps[j].mark()}
         }
       }
     }
-    self.steps.iter().filter(|&i| i.marked())
+    steps.iter().filter(|&i| i.marked())
       .map(|&i| ctx.clauses[i.clause()].name as i64).collect()
   }
-}
 
-fn propagate(c: &[i64], ctx: &mut Context, Propagate {ls, va, steps}: &mut Propagate) -> bool {
-  ls[0].clear();
-  ls[1].clear();
-  steps.clear();
-  va.reserve_clear(ctx.max_var);
+  fn propagate(&mut self, c: &[i64]) -> bool {
+    let Self {ctx, ls, va, steps, ..} = self;
+    ls[0].clear();
+    ls[1].clear();
+    steps.clear();
+    va.reserve_clear(ctx.max_var);
 
-  macro_rules! push {($i:expr) => {(steps.len(), steps.push(PStep::new($i))).0}}
+    macro_rules! push {($i:expr) => {(steps.len(), steps.push(PStep::new($i))).0}}
 
-  for l in c {
-    ls[0].push_back(-l);
-    ls[1].push_back(-l);
-    if !va.assign(-l, None) { return true }
-  }
+    for l in c {
+      ls[0].push_back(-l);
+      ls[1].push_back(-l);
+      if !va.assign(-l, None) { return true }
+    }
 
-  for (&i, &l) in &ctx.units {
-    ls[0].push_back(l);
-    ls[1].push_back(l);
-    if !va.assign(l, Some(push!(i))) { return true }
-  }
+    for (&i, &l) in &ctx.units {
+      ls[0].push_back(l);
+      ls[1].push_back(l);
+      if !va.assign(l, Some(push!(i))) { return true }
+    }
 
-  let watch = init_watch(&mut ctx.watch, ctx.max_var, &ctx.clauses);
+    let watch = init_watch(&mut ctx.watch, ctx.max_var, &ctx.clauses);
 
-  // Main unit propagation loop
-  while let Some((m, l)) = next_prop_lit(ls) {
-    // 'is' contains the IDs of all clauses containing -l
-    let mut is = &*watch[-l];
-    let mut wi = 0..;
-    while let Some(&i) = is.get(wi.next().unwrap()) {
-      let cl = &mut ctx.clauses[i];
+    // Main unit propagation loop
+    while let Some((m, l)) = next_prop_lit(ls) {
+      // 'is' contains the IDs of all clauses containing -l
+      let mut is = &*watch[-l];
+      let mut wi = 0..;
+      while let Some(&i) = is.get(wi.next().unwrap()) {
+        let cl = &mut ctx.clauses[i];
 
-      // m indicates propagation targets (m == true for marked clauses),
-      // va is the current variable assignment, and i is the ID of a clause
-      // which may potentially be unit under va. If c is verified under va,
-      // do nothing and return None. If c is not verified but contains two
-      // or more undecided literals, watch them and go to the next clause. Otherwise,
-      // let k be a new unit literal.
+        // m indicates propagation targets (m == true for marked clauses),
+        // va is the current variable assignment, and i is the ID of a clause
+        // which may potentially be unit under va. If c is verified under va,
+        // do nothing and return None. If c is not verified but contains two
+        // or more undecided literals, watch them and go to the next clause. Otherwise,
+        // let k be a new unit literal.
 
-      // We process marked and unmarked clauses in two separate passes.
-      // If this clause is in the wrong class then skip.
-      if m != cl.marked {continue}
+        // We process marked and unmarked clauses in two separate passes.
+        // If this clause is in the wrong class then skip.
+        if m != cl.marked {continue}
 
-      // Watched clauses have two literals at the front, that are being watched.
-      if let [a, b, ..] = **cl {
-        // If one of the watch literals is satisfied,
-        // then this clause is satisfied so skip.
-        if va.is_true(a) || va.is_true(b) {
+        // Watched clauses have two literals at the front, that are being watched.
+        if let [a, b, ..] = **cl {
+          // If one of the watch literals is satisfied,
+          // then this clause is satisfied so skip.
+          if va.is_true(a) || va.is_true(b) {
+            continue
+          }
+          // We know that -l is one of the first two literals; make sure
+          // it is at cl[1] by swapping with the other watch if necessary.
+          if a == -l {cl.swap(0, 1)}
+        } else { unreachable!("watched clauses should be at least binary") }
+
+        if cl.iter().any(|&l| va.is_true(l)) {continue}
+
+        // Since -l has just been falsified, we need a new watch literal to replace it.
+        // Let j be another literal in the clause that has not been falsified.
+        if let Some(j) = (2..cl.len()).find(|&i| !va.is_false(cl[i])) {
+          // eprintln!("Working on clause {}: {:?} at {}", i, c, j);
+
+          cl.swap(1, j); // Replace the -l literal with cl[j]
+          let k = cl[1]; // let k be the new literal
+          del_watch(watch, -l, i, &ctx.clauses); // remove this clause from the -l watch list
+          add_watch(watch, k, i); // and add it to the k watch list
+
+          // Since we just modified the -l watch list, that we are currently iterating
+          // over, we have to tweak the iterator so that we don't miss anything.
+          wi.start -= 1; is = &*watch[-l];
+
+          // We're done here, we didn't find a new unit
           continue
         }
-        // We know that -l is one of the first two literals; make sure
-        // it is at cl[1] by swapping with the other watch if necessary.
-        if a == -l {cl.swap(0, 1)}
-      } else { unreachable!("watched clauses should be at least binary") }
 
-      if cl.iter().any(|&l| va.is_true(l)) {continue}
+        // Otherwise, there are no other non-falsified literals in the clause,
+        // meaning that this is a binary clause of the form k \/ -l
+        // where k is the other watch literal in the clause, so we either
+        // have a new unit, or if k is falsified then we proved false and can finish.
+        let k = cl[0];
 
-      // Since -l has just been falsified, we need a new watch literal to replace it.
-      // Let j be another literal in the clause that has not been falsified.
-      if let Some(j) = (2..cl.len()).find(|&i| !va.is_false(cl[i])) {
-        // eprintln!("Working on clause {}: {:?} at {}", i, c, j);
-
-        cl.swap(1, j); // Replace the -l literal with cl[j]
-        let k = cl[1]; // let k be the new literal
-        del_watch(watch, -l, i, &ctx.clauses); // remove this clause from the -l watch list
-        add_watch(watch, k, i); // and add it to the k watch list
-
-        // Since we just modified the -l watch list, that we are currently iterating
-        // over, we have to tweak the iterator so that we don't miss anything.
-        wi.start -= 1; is = &*watch[-l];
-
-        // We're done here, we didn't find a new unit
-        continue
-      }
-
-      // Otherwise, there are no other non-falsified literals in the clause,
-      // meaning that this is a binary clause of the form k \/ -l
-      // where k is the other watch literal in the clause, so we either
-      // have a new unit, or if k is falsified then we proved false and can finish.
-      let k = cl[0];
-
-      // Push the new unit on the chain
-      if !va.assign(k, Some(push!(i))) {
-        // if we find a contradiction then exit
-        return true
-      }
-
-      // Otherwise, put k on the work lists and go to the next clause.
-      ls[0].push_back(k);
-      ls[1].push_back(k);
-    }
-  }
-
-  // If there are no more literals to propagate, unit propagation has failed
-  if LOG_UNIT_PROP_ERROR {
-    let _ = propagate_stuck(ctx, va, steps, c);
-    panic!("Unit propagation stuck, cannot add clause {:?}", c)
-  }
-  false
-}
-
-#[allow(unused)]
-fn propagate_stuck(ctx: &Context, va: &VAssign, steps: &[PStep], c: &[i64]) -> io::Result<()> {
-  // If unit propagation is stuck, write an error log
-  let mut log = BufWriter::new(File::create("unit_prop_error.log")?);
-  writeln!(log, "Clauses available at failure ((l) means false, [l] means true):")?;
-  for (addr, c) in &ctx.clauses {
-    write!(log, "{:?}: {} = ", addr, c.name)?;
-    let mut sat = false;
-    let mut lits = 0;
-    for lit in c {
-      if va.is_true(lit) { write!(log, "[{}] ", lit)?; sat = true }
-      else if va.is_false(lit) { write!(log, "({}) ", lit)? }
-      else { lits += 1; write!(log, "{} ", lit)? }
-    }
-    if let [l] = **c {
-      if ctx.units.get(&addr) != Some(&l) {
-        write!(log, " (BUG: untracked unit clause)")?
-      }
-    }
-    writeln!(log, "{}", match (sat, lits) {
-      (true, _) => " (satisfied)",
-      (_, 0) => " (BUG: undetected falsified clause)",
-      (_, 1) => " (BUG: undetected unit clause)",
-      _ => ""
-    })?;
-  }
-  writeln!(log, "\nRecorded steps at failure: {:?}",
-    steps.iter().map(|i| i.clause()).collect::<Box<[_]>>())?;
-  writeln!(log, "\nObtained unit literals at failure:")?;
-  for &lit in &va.tru_stack {
-    assert!(va.is_true(lit));
-    writeln!(log, "{}: {:?}", lit, va.reasons[lit].map(|i| steps[i].clause()))?;
-  }
-  writeln!(log, "\nFailed to add clause: {:?}", c)?;
-  log.flush()
-}
-
-fn propagate_hint(ls: &[i64], ctx: &mut Context, is: &[i64], strict: bool,
-    Propagate {va, steps, ..}: &mut Propagate) -> bool {
-  steps.clear();
-  va.reserve_clear(ctx.max_var);
-
-  for &x in ls {
-    assert!(va.assign(-x, None), "tautologous clause");
-  }
-
-  let mut is: Vec<usize> = is.iter().map(|&i| ctx.get(i as u64)).collect();
-  let mut queue = vec![];
-  loop {
-    let len = is.len();
-    'a: for c in is.drain(..) {
-      let mut uf: Option<i64> = None;
-      let cl = &*ctx.clauses[c];
-      for &l in cl {
-        if !va.is_false(l) && uf.replace(l).is_some() {
-          assert!(!strict, "at {:?}: clause {:?} is not unit", ctx.step, c);
-          queue.push(c);
-          continue 'a
-        }
-      }
-      match uf {
-        None => {
-          steps.push(PStep::new(c));
+        // Push the new unit on the chain
+        if !va.assign(k, Some(push!(i))) {
+          // if we find a contradiction then exit
           return true
-        },
-        Some(l) => assert!(
-          va.assign(l, (Some(steps.len()), steps.push(PStep::new(c))).0),
-          "l is not assigned"),
-      }
-    }
-    if queue.len() >= len {return false}
-    mem::swap(&mut is, &mut queue);
-  }
-}
+        }
 
-fn build_step(ls: &[i64], ctx: &mut Context, p: &mut Propagate, hint: Option<&[i64]>, strict: bool) -> Option<Vec<i64>> {
-  match hint {
-    Some(is) if propagate_hint(&ls, ctx, is, strict, p) => Some(p.minimized_hint(ctx)),
-    _ if propagate(ls, ctx, p) => Some(p.minimized_hint(ctx)),
-    _ => None
-  }
-}
+        // Otherwise, put k on the work lists and go to the next clause.
+        ls[0].push_back(k);
+        ls[1].push_back(k);
+      }
+    }
 
-fn run_rat_step<'a>(ls: &[i64], ctx: &mut Context, p: &mut Propagate, init: &[i64],
-    mut rats: Option<(&'a i64, &'a [i64])>, strict: bool) -> Vec<i64> {
-  if rats.is_none() {
-    if let Some(res) = build_step(ls, ctx, p, if init.is_empty() {None} else {Some(init)}, strict) {
-      return res
+    // If there are no more literals to propagate, unit propagation has failed
+    if LOG_UNIT_PROP_ERROR {
+      let _ = self.propagate_stuck(c);
+      panic!("Unit propagation stuck, cannot add clause {:?}", c)
+    }
+    false
+  }
+
+  #[allow(unused)]
+  fn propagate_stuck(&self, c: &[i64]) -> io::Result<()> {
+    // If unit propagation is stuck, write an error log
+    let mut log = BufWriter::new(File::create("unit_prop_error.log")?);
+    writeln!(log, "Clauses available at failure ((l) means false, [l] means true):")?;
+    for (addr, c) in &self.ctx.clauses {
+      write!(log, "{:?}: {} = ", addr, c.name)?;
+      let mut sat = false;
+      let mut lits = 0;
+      for lit in c {
+        if self.va.is_true(lit) { write!(log, "[{}] ", lit)?; sat = true }
+        else if self.va.is_false(lit) { write!(log, "({}) ", lit)? }
+        else { lits += 1; write!(log, "{} ", lit)? }
+      }
+      if let [l] = **c {
+        if self.ctx.units.get(&addr) != Some(&l) {
+          write!(log, " (BUG: untracked unit clause)")?
+        }
+      }
+      writeln!(log, "{}", match (sat, lits) {
+        (true, _) => " (satisfied)",
+        (_, 0) => " (BUG: undetected falsified clause)",
+        (_, 1) => " (BUG: undetected unit clause)",
+        _ => ""
+      })?;
+    }
+    writeln!(log, "\nRecorded steps at failure: {:?}",
+      self.steps.iter().map(|i| i.clause()).collect::<Box<[_]>>())?;
+    writeln!(log, "\nObtained unit literals at failure:")?;
+    for &lit in &self.va.tru_stack {
+      assert!(self.va.is_true(lit));
+      writeln!(log, "{}: {:?}", lit,
+        self.va.reasons[lit].map(|i| self.steps[i].clause()))?;
+    }
+    writeln!(log, "\nFailed to add clause: {:?}", c)?;
+    log.flush()
+  }
+
+  fn propagate_hint(&mut self, ls: &[i64], is: &[i64], strict: bool) -> bool {
+    let Self {va, steps, ctx, ..} = self;
+    steps.clear();
+    va.reserve_clear(ctx.max_var);
+
+    for &x in ls {
+      assert!(va.assign(-x, None), "tautologous clause");
+    }
+
+    let mut is: Vec<usize> = is.iter().map(|&i| ctx.get(i as u64)).collect();
+    let mut queue = vec![];
+    loop {
+      let len = is.len();
+      'a: for c in is.drain(..) {
+        let mut uf: Option<i64> = None;
+        let cl = &*ctx.clauses[c];
+        for &l in cl {
+          if !va.is_false(l) && uf.replace(l).is_some() {
+            assert!(!strict, "at {:?}: clause {:?} is not unit", ctx.step, c);
+            queue.push(c);
+            continue 'a
+          }
+        }
+        match uf {
+          None => {
+            steps.push(PStep::new(c));
+            return true
+          },
+          Some(l) => assert!(
+            va.assign(l, (Some(steps.len()), steps.push(PStep::new(c))).0),
+            "l is not assigned"),
+        }
+      }
+      if queue.len() >= len {return false}
+      mem::swap(&mut is, &mut queue);
     }
   }
-  let _ = propagate_hint(&ls, ctx, init, strict, p);
-  let pivot = ls[0];
-  let ls2: Vec<i64> = p.va.tru_stack.iter().map(|&i| -i).filter(|&i| i != pivot).collect();
-  let mut proofs = HashMap::new();
-  let mut order = vec![];
-  while let Some((&s, rest)) = rats {
-    let step = ctx.get(-s as u64);
-    order.push(step);
-    match rest.iter().position(|&i| i < 0) {
-      None => {
-        proofs.insert(step, rest);
-        break
-      }
-      Some(i) => {
-        let (chain, r) = rest.split_at(i);
-        proofs.insert(step, chain);
-        rats = r.split_first();
-      }
+
+  fn build_step(&mut self, ls: &[i64], hint: Option<&[i64]>, strict: bool) -> Option<Vec<i64>> {
+    match hint {
+      Some(is) if self.propagate_hint(&ls, is, strict) => Some(self.minimized_hint()),
+      _ if self.propagate(ls) => Some(self.minimized_hint()),
+      _ => None
     }
   }
-  let mut steps = vec![];
-  let mut todo = vec![];
-  for (c, cl) in &ctx.clauses {
-    if cl.lits.contains(&-pivot) {
-      let mut resolvent = ls2.clone();
-      resolvent.extend(cl.lits.iter().cloned().filter(|&i| i != -pivot));
-      match proofs.get(&c) {
-        Some(&chain) => todo.push((c, resolvent, Some(chain))),
-        None if strict => panic!("Clause {:?} not in LRAT trace", cl.lits),
+
+  fn run_rat_step<'a>(&mut self, ls: &[i64], init: &[i64],
+      mut rats: Option<(&'a i64, &'a [i64])>, strict: bool) -> Vec<i64> {
+    if rats.is_none() {
+      if let Some(res) = self.build_step(ls, if init.is_empty() {None} else {Some(init)}, strict) {
+        return res
+      }
+    }
+    let _ = self.propagate_hint(&ls, init, strict);
+    let pivot = ls[0];
+    let ls2: Vec<i64> = self.va.tru_stack.iter().map(|&i| -i).filter(|&i| i != pivot).collect();
+    let mut proofs = HashMap::new();
+    let mut order = vec![];
+    while let Some((&s, rest)) = rats {
+      let step = self.ctx.get(-s as u64);
+      order.push(step);
+      match rest.iter().position(|&i| i < 0) {
         None => {
-          order.push(c);
-          todo.push((c, resolvent, None));
+          proofs.insert(step, rest);
+          break
+        }
+        Some(i) => {
+          let (chain, r) = rest.split_at(i);
+          proofs.insert(step, chain);
+          rats = r.split_first();
         }
       }
     }
-  }
-  let mut proofs: HashMap<_, _> = todo.into_iter().map(|(c, resolvent, hint)|
-    (c, build_step(&resolvent, ctx, p, hint, strict).unwrap_or_else(||
-      panic!("Unit propagation stuck, cannot resolve clause {:?}", resolvent)))).collect();
+    let mut steps = vec![];
+    let mut todo = vec![];
+    for (c, cl) in &self.ctx.clauses {
+      if cl.lits.contains(&-pivot) {
+        let mut resolvent = ls2.clone();
+        resolvent.extend(cl.lits.iter().cloned().filter(|&i| i != -pivot));
+        match proofs.get(&c) {
+          Some(&chain) => todo.push((c, resolvent, Some(chain))),
+          None if strict => panic!("Clause {:?} not in LRAT trace", cl.lits),
+          None => {
+            order.push(c);
+            todo.push((c, resolvent, None));
+          }
+        }
+      }
+    }
+    let mut proofs: HashMap<_, _> = todo.into_iter().map(|(c, resolvent, hint)|
+      (c, self.build_step(&resolvent, hint, strict).unwrap_or_else(||
+        panic!("Unit propagation stuck, cannot resolve clause {:?}", resolvent)))).collect();
 
-  for c in order {
-    let mut chain = proofs.remove(&c).unwrap();
-    steps.push(-(ctx.clauses[c].name as i64));
-    steps.append(&mut chain);
+    for c in order {
+      let mut chain = proofs.remove(&c).unwrap();
+      steps.push(-(self.ctx.clauses[c].name as i64));
+      steps.append(&mut chain);
+    }
+    steps
   }
-  steps
 }
 
 fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Result<()> {
-  let mut ctx: Context = Context::new();
   let mut origs = Vec::new();
-  let propagate = &mut Propagate::default();
+  let solv = &mut Solver::default();
   for s in StepIter(BackParser::new(mode, frat)?) {
     // eprintln!("<- {:?}", s);
     match s {
 
       Step::Orig(i, ls) => {
-        ctx.step = Some(i);
-        let c = ctx.remove(i);
-        c.check_subsumed(&ls, ctx.step);
+        solv.ctx.step = Some(i);
+        let c = solv.ctx.remove(i);
+        c.check_subsumed(&ls, solv.ctx.step);
         if full || c.marked {  // If the original clause is marked
           origs.push((i, c.lits)); // delay origs to the end
         }
@@ -505,24 +505,24 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
       }
 
       Step::Add(i, ls, p) => {
-        ctx.step = Some(i);
-        let c = ctx.remove(i);
-        c.check_subsumed(&ls, ctx.step);
+        solv.ctx.step = Some(i);
+        let c = solv.ctx.remove(i);
+        c.check_subsumed(&ls, solv.ctx.step);
         if full || c.marked {
           let steps: Vec<i64> = if let Some(Proof::LRAT(is)) = p {
             if let Some(start) = is.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
               let (init, rest) = is.split_at(start);
-              run_rat_step(&c, &mut ctx, propagate, init, rest.split_first(), false)
+              solv.run_rat_step(&c, init, rest.split_first(), false)
             } else {
-              run_rat_step(&c, &mut ctx, propagate, &is, None, false)
+              solv.run_rat_step(&c, &is, None, false)
             }
           } else {
-            run_rat_step(&c, &mut ctx, propagate, &[], None, false)
+            solv.run_rat_step(&c, &[], None, false)
           };
           for &i in &steps {
             let i = i.abs() as u64;
-            let c = ctx.get(i);
-            let cl = &mut ctx.clauses[c];
+            let c = solv.ctx.get(i);
+            let cl = &mut solv.ctx.clauses[c];
             // let v = cs.get_mut(&i).unwrap();
             if !cl.marked { // If the necessary clause is not active yet
               cl.marked = true; // Make it active
@@ -537,8 +537,8 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
       }
 
       Step::Reloc(mut relocs) => {
-        ctx.step = None;
-        ctx.reloc(&mut relocs);
+        solv.ctx.step = None;
+        solv.ctx.reloc(&mut relocs);
         if !relocs.is_empty() {
           ElabStep::Reloc(relocs).write(w).expect("Failed to write reloc step");
         }
@@ -546,7 +546,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
 
       Step::Del(i, mut ls) => {
         dedup_vec(&mut ls);
-        ctx.insert(i, false, ls.into());
+        solv.ctx.insert(i, false, ls.into());
         if full {
           ElabStep::Del(i).write(w).expect("Failed to write delete step");
         }
@@ -555,7 +555,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
       Step::Final(i, mut ls) => {
         // Identical to the Del case, except that the clause should be marked if empty
         dedup_vec(&mut ls);
-        ctx.insert(i, ls.is_empty(), ls.into());
+        solv.ctx.insert(i, ls.is_empty(), ls.into());
       }
 
       Step::Todo(_) => ()
@@ -767,19 +767,18 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
 
 fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8>) -> io::Result<()> {
   let lp = LRATParser::from(mode, lrat);
-  let mut ctx: Context = Context::new();
   let mut k = 0;
-  let propagate = &mut Propagate::default();
+  let solv = &mut Solver::default();
 
   for c in cnf {
     k += 1;
-    ctx.step = Some(k);
+    solv.ctx.step = Some(k);
     // eprintln!("{}: {:?}", k, c);
-    ctx.insert(k, true, c);
+    solv.ctx.insert(k, true, c);
   }
 
   for (i, s) in lp {
-    ctx.step = Some(i);
+    solv.ctx.step = Some(i);
     // eprintln!("{}: {:?}", i, s);
     match s {
 
@@ -789,17 +788,17 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
         // eprintln!("{}: {:?} {:?}", k, ls, p);
         if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
           let (init, rest) = p.split_at(start);
-          run_rat_step(&ls, &mut ctx, propagate, init, rest.split_first(), true);
+          solv.run_rat_step(&ls, init, rest.split_first(), true);
         } else {
-          run_rat_step(&ls, &mut ctx, propagate, &p, None, true);
+          solv.run_rat_step(&ls, &p, None, true);
         }
         if ls.is_empty() { return Ok(()) }
-        ctx.insert(i, true, ls.into());
+        solv.ctx.insert(i, true, ls.into());
       }
 
       LRATStep::Del(ls) => {
         assert!(i == k, "out-of-order LRAT proofs not supported");
-        for c in ls { ctx.remove(c.try_into().unwrap()); }
+        for c in ls { solv.ctx.remove(c.try_into().unwrap()); }
       }
     }
   }
