@@ -18,10 +18,19 @@ use super::perm_clause::*;
 // Set this to true to get an error log when unit propagation fails
 const LOG_UNIT_PROP_ERROR: bool = false;
 
+#[derive(Copy, Clone, Default)]
+struct Reason(usize);
+
+impl Reason {
+  const NONE: Self = Self(0);
+  fn new(val: usize) -> Self { Self(val + 1) }
+  fn clause(self) -> Option<usize> { self.0.checked_sub(1) }
+}
+
 #[derive(Default)]
 struct VAssign {
   tru_lits: MidVec<bool>,
-  reasons: MidVec<Option<usize>>,
+  reasons: MidVec<Reason>,
   tru_stack: Vec<i64>,
 }
 
@@ -29,7 +38,7 @@ impl VAssign {
   fn clear(&mut self) {
     for i in self.tru_stack.drain(..) {
       self.tru_lits[i] = false;
-      self.reasons[i] = None;
+      self.reasons[i] = Reason::NONE;
     }
   }
 
@@ -45,7 +54,7 @@ impl VAssign {
   // Attempt to update the variable assignment and make l true under it.
   // If the update is impossible because l is already false under it, return false.
   // Otherwise, update and return true.
-  fn assign(&mut self, l: i64, reason: Option<usize>) -> bool {
+  fn assign(&mut self, l: i64, reason: Reason) -> bool {
     if self.is_true(l) { return true }
     if self.is_false(l) {
       self.reasons[l] = reason;
@@ -89,7 +98,7 @@ impl IndexMut<usize> for Clause {
 
 impl Clause {
 
-  fn check_subsumed(&self, lits: &[i64], step: Option<u64>) {
+  fn check_subsumed(&self, lits: &[i64], step: u64) {
     assert!(lits.iter().all(|lit| self.contains(lit)),
       "at {:?}: Clause {:?} added here will later be deleted as {:?}",
       step, self, lits)
@@ -103,7 +112,8 @@ struct Context {
   names: HashMap<u64, usize>,
   units: HashMap<usize, i64>,
   watch: Option<MidVec<Vec<usize>>>,
-  step: Option<u64>
+  va: VAssign,
+  step: u64
 }
 
 fn del_watch(watch: &mut MidVec<Vec<usize>>, l: i64, i: usize, clauses: &Slab<Clause>) {
@@ -225,13 +235,12 @@ impl PStep {
 struct Solver {
   ctx: Context,
   ls: [VecDeque<i64>; 2],
-  va: VAssign,
   steps: Vec<PStep>,
 }
 
 impl Solver {
   fn minimized_hint(&mut self) -> Vec<i64> {
-    let Self {steps, ctx, va, ..} = self;
+    let Self {ctx, steps, ..} = self;
     steps.last_mut().unwrap_or_else(
       || panic!("at {:?}: minimizing empty hint", ctx.step)).mark();
 
@@ -239,7 +248,7 @@ impl Solver {
       let s = steps[i];
       if s.marked() {
         for &l in &*ctx.clauses[s.clause()] {
-          if let Some(j) = va.reasons[-l] {steps[j].mark()}
+          if let Some(j) = ctx.va.reasons[-l].clause() {steps[j].mark()}
         }
       }
     }
@@ -248,27 +257,30 @@ impl Solver {
   }
 
   fn propagate(&mut self, c: &[i64]) -> bool {
-    let Self {ctx, ls, va, steps, ..} = self;
+    let Self {ctx, ls, steps, ..} = self;
+    let Context {
+      ref mut watch, max_var, ref mut clauses,
+      ref mut va, ref units, ..} = *ctx;
     ls[0].clear();
     ls[1].clear();
     steps.clear();
-    va.reserve_clear(ctx.max_var);
+    va.reserve_clear(max_var);
 
     macro_rules! push {($i:expr) => {(steps.len(), steps.push(PStep::new($i))).0}}
 
     for l in c {
       ls[0].push_back(-l);
       ls[1].push_back(-l);
-      if !va.assign(-l, None) { return true }
+      if !va.assign(-l, Reason::NONE) { return true }
     }
 
-    for (&i, &l) in &ctx.units {
+    for (&i, &l) in units {
       ls[0].push_back(l);
       ls[1].push_back(l);
-      if !va.assign(l, Some(push!(i))) { return true }
+      if !va.assign(l, Reason::new(push!(i))) { return true }
     }
 
-    let watch = init_watch(&mut ctx.watch, ctx.max_var, &ctx.clauses);
+    let watch = init_watch(watch, max_var, clauses);
 
     // Main unit propagation loop
     while let Some((m, l)) = next_prop_lit(ls) {
@@ -276,7 +288,7 @@ impl Solver {
       let mut is = &*watch[-l];
       let mut wi = 0..;
       while let Some(&i) = is.get(wi.next().unwrap()) {
-        let cl = &mut ctx.clauses[i];
+        let cl = &mut clauses[i];
 
         // m indicates propagation targets (m == true for marked clauses),
         // va is the current variable assignment, and i is the ID of a clause
@@ -310,7 +322,7 @@ impl Solver {
 
           cl.swap(1, j); // Replace the -l literal with cl[j]
           let k = cl[1]; // let k be the new literal
-          del_watch(watch, -l, i, &ctx.clauses); // remove this clause from the -l watch list
+          del_watch(watch, -l, i, clauses); // remove this clause from the -l watch list
           add_watch(watch, k, i); // and add it to the k watch list
 
           // Since we just modified the -l watch list, that we are currently iterating
@@ -328,7 +340,7 @@ impl Solver {
         let k = cl[0];
 
         // Push the new unit on the chain
-        if !va.assign(k, Some(push!(i))) {
+        if !va.assign(k, Reason::new(push!(i))) {
           // if we find a contradiction then exit
           return true
         }
@@ -349,20 +361,21 @@ impl Solver {
 
   #[allow(unused)]
   fn propagate_stuck(&self, c: &[i64]) -> io::Result<()> {
+    let Self {ctx: Context {va, clauses, units, ..}, steps, ..} = self;
     // If unit propagation is stuck, write an error log
     let mut log = BufWriter::new(File::create("unit_prop_error.log")?);
     writeln!(log, "Clauses available at failure ((l) means false, [l] means true):")?;
-    for (addr, c) in &self.ctx.clauses {
+    for (addr, c) in clauses {
       write!(log, "{:?}: {} = ", addr, c.name)?;
       let mut sat = false;
       let mut lits = 0;
       for lit in c {
-        if self.va.is_true(lit) { write!(log, "[{}] ", lit)?; sat = true }
-        else if self.va.is_false(lit) { write!(log, "({}) ", lit)? }
+        if va.is_true(lit) { write!(log, "[{}] ", lit)?; sat = true }
+        else if va.is_false(lit) { write!(log, "({}) ", lit)? }
         else { lits += 1; write!(log, "{} ", lit)? }
       }
       if let [l] = **c {
-        if self.ctx.units.get(&addr) != Some(&l) {
+        if units.get(&addr) != Some(&l) {
           write!(log, " (BUG: untracked unit clause)")?
         }
       }
@@ -374,24 +387,24 @@ impl Solver {
       })?;
     }
     writeln!(log, "\nRecorded steps at failure: {:?}",
-      self.steps.iter().map(|i| i.clause()).collect::<Box<[_]>>())?;
+      steps.iter().map(|i| i.clause()).collect::<Box<[_]>>())?;
     writeln!(log, "\nObtained unit literals at failure:")?;
-    for &lit in &self.va.tru_stack {
-      assert!(self.va.is_true(lit));
+    for &lit in &va.tru_stack {
+      assert!(va.is_true(lit));
       writeln!(log, "{}: {:?}", lit,
-        self.va.reasons[lit].map(|i| self.steps[i].clause()))?;
+        va.reasons[lit].clause().map(|i| self.steps[i].clause()))?;
     }
     writeln!(log, "\nFailed to add clause: {:?}", c)?;
     log.flush()
   }
 
   fn propagate_hint(&mut self, ls: &[i64], is: &[i64], strict: bool) -> bool {
-    let Self {va, steps, ctx, ..} = self;
+    let Self {steps, ctx, ..} = self;
     steps.clear();
-    va.reserve_clear(ctx.max_var);
+    ctx.va.reserve_clear(ctx.max_var);
 
     for &x in ls {
-      assert!(va.assign(-x, None), "tautologous clause");
+      assert!(ctx.va.assign(-x, Reason::NONE), "tautologous clause");
     }
 
     let mut is: Vec<usize> = is.iter().map(|&i| ctx.get(i as u64)).collect();
@@ -402,7 +415,7 @@ impl Solver {
         let mut uf: Option<i64> = None;
         let cl = &*ctx.clauses[c];
         for &l in cl {
-          if !va.is_false(l) && uf.replace(l).is_some() {
+          if !ctx.va.is_false(l) && uf.replace(l).is_some() {
             assert!(!strict, "at {:?}: clause {:?} is not unit", ctx.step, c);
             queue.push(c);
             continue 'a
@@ -414,7 +427,7 @@ impl Solver {
             return true
           },
           Some(l) => assert!(
-            va.assign(l, (Some(steps.len()), steps.push(PStep::new(c))).0),
+            ctx.va.assign(l, Reason::new((steps.len(), steps.push(PStep::new(c))).0)),
             "l is not assigned"),
         }
       }
@@ -440,7 +453,8 @@ impl Solver {
     }
     let _ = self.propagate_hint(&ls, init, strict);
     let pivot = ls[0];
-    let ls2: Vec<i64> = self.va.tru_stack.iter().map(|&i| -i).filter(|&i| i != pivot).collect();
+    let ls2: Vec<i64> = self.ctx.va.tru_stack.iter()
+      .map(|&i| -i).filter(|&i| i != pivot).collect();
     let mut proofs = HashMap::new();
     let mut order = vec![];
     while let Some((&s, rest)) = rats {
@@ -495,7 +509,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
     match s {
 
       Step::Orig(i, ls) => {
-        solv.ctx.step = Some(i);
+        solv.ctx.step = i;
         let c = solv.ctx.remove(i);
         c.check_subsumed(&ls, solv.ctx.step);
         if full || c.marked {  // If the original clause is marked
@@ -505,7 +519,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
       }
 
       Step::Add(i, ls, p) => {
-        solv.ctx.step = Some(i);
+        solv.ctx.step = i;
         let c = solv.ctx.remove(i);
         c.check_subsumed(&ls, solv.ctx.step);
         if full || c.marked {
@@ -537,7 +551,6 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
       }
 
       Step::Reloc(mut relocs) => {
-        solv.ctx.step = None;
         solv.ctx.reloc(&mut relocs);
         if !relocs.is_empty() {
           ElabStep::Reloc(relocs).write(w).expect("Failed to write reloc step");
@@ -772,13 +785,13 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
 
   for c in cnf {
     k += 1;
-    solv.ctx.step = Some(k);
+    solv.ctx.step = k;
     // eprintln!("{}: {:?}", k, c);
     solv.ctx.insert(k, true, c);
   }
 
   for (i, s) in lp {
-    solv.ctx.step = Some(i);
+    solv.ctx.step = i;
     // eprintln!("{}: {:?}", i, s);
     match s {
 
