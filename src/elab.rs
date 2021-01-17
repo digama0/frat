@@ -214,27 +214,38 @@ fn next_prop_lit([ls0, ls1]: &mut [VecDeque<i64>; 2]) -> Option<(bool, i64)> {
   None
 }
 
+#[derive(Copy, Clone)]
+struct PStep(usize);
+
+impl PStep {
+  #[inline] fn new(s: usize) -> Self { Self(s << 1) }
+  #[inline] fn clause(self) -> usize { self.0 >> 1 }
+  #[inline] fn mark(&mut self) { self.0 |= 1 }
+  #[inline] fn marked(self) -> bool { self.0 & 1 != 0 }
+}
+
 #[derive(Default)]
 struct Propagate {
   ls: [VecDeque<i64>; 2],
   va: VAssign,
-  steps: Vec<usize>,
+  steps: Vec<PStep>,
 }
 
 impl Propagate {
-  fn minimize_hint(&mut self, ctx: &Context) {
-    let mut need = vec![false; self.steps.len()];
-    *need.last_mut().unwrap_or_else(
-      || panic!("at {:?}: minimizing empty hint", ctx.step)) = true;
+  fn minimized_hint(&mut self, ctx: &Context) -> Vec<i64> {
+    self.steps.last_mut().unwrap_or_else(
+      || panic!("at {:?}: minimizing empty hint", ctx.step)).mark();
 
-    for (i, &s) in self.steps.iter().enumerate().rev() {
-      if need[i] {
-        for &l in &*ctx.clauses[s] {
-          if let Some(j) = self.va.reasons[-l] {need[j] = true}
+    for i in (0..self.steps.len()).rev() {
+      let s = self.steps[i];
+      if s.marked() {
+        for &l in &*ctx.clauses[s.clause()] {
+          if let Some(j) = self.va.reasons[-l] {self.steps[j].mark()}
         }
       }
     }
-    self.steps.retain({ let mut i = need.into_iter(); move |_| i.next().unwrap() });
+    self.steps.iter().filter(|&i| i.marked())
+      .map(|&i| ctx.clauses[i.clause()].name as i64).collect()
   }
 }
 
@@ -244,7 +255,7 @@ fn propagate(c: &[i64], ctx: &mut Context, Propagate {ls, va, steps}: &mut Propa
   steps.clear();
   va.reserve_clear(ctx.max_var);
 
-  macro_rules! push {($i:expr) => {(steps.len(), steps.push($i)).0}}
+  macro_rules! push {($i:expr) => {(steps.len(), steps.push(PStep::new($i))).0}}
 
   for l in c {
     ls[0].push_back(-l);
@@ -338,7 +349,7 @@ fn propagate(c: &[i64], ctx: &mut Context, Propagate {ls, va, steps}: &mut Propa
 }
 
 #[allow(unused)]
-fn propagate_stuck(ctx: &Context, va: &VAssign, steps: &[usize], c: &[i64]) -> io::Result<()> {
+fn propagate_stuck(ctx: &Context, va: &VAssign, steps: &[PStep], c: &[i64]) -> io::Result<()> {
   // If unit propagation is stuck, write an error log
   let mut log = BufWriter::new(File::create("unit_prop_error.log")?);
   writeln!(log, "Clauses available at failure ((l) means false, [l] means true):")?;
@@ -363,11 +374,12 @@ fn propagate_stuck(ctx: &Context, va: &VAssign, steps: &[usize], c: &[i64]) -> i
       _ => ""
     })?;
   }
-  writeln!(log, "\nRecorded steps at failure: {:?}", steps)?;
+  writeln!(log, "\nRecorded steps at failure: {:?}",
+    steps.iter().map(|i| i.clause()).collect::<Box<[_]>>())?;
   writeln!(log, "\nObtained unit literals at failure:")?;
   for &lit in &va.tru_stack {
     assert!(va.is_true(lit));
-    writeln!(log, "{}: {:?}", lit, va.reasons[lit].map(|i| steps[i]))?;
+    writeln!(log, "{}: {:?}", lit, va.reasons[lit].map(|i| steps[i].clause()))?;
   }
   writeln!(log, "\nFailed to add clause: {:?}", c)?;
   log.flush()
@@ -398,11 +410,11 @@ fn propagate_hint(ls: &[i64], ctx: &mut Context, is: &[i64], strict: bool,
       }
       match uf {
         None => {
-          steps.push(c);
+          steps.push(PStep::new(c));
           return true
         },
         Some(l) => assert!(
-          va.assign(l, (Some(steps.len()), steps.push(c)).0),
+          va.assign(l, (Some(steps.len()), steps.push(PStep::new(c))).0),
           "l is not assigned"),
       }
     }
@@ -412,13 +424,9 @@ fn propagate_hint(ls: &[i64], ctx: &mut Context, is: &[i64], strict: bool,
 }
 
 fn build_step(ls: &[i64], ctx: &mut Context, p: &mut Propagate, hint: Option<&[i64]>, strict: bool) -> Option<Vec<i64>> {
-  fn finish(ctx: &Context, p: &mut Propagate) -> Vec<i64> {
-    p.minimize_hint(ctx);
-    p.steps.iter().map(|&i| ctx.clauses[i].name as i64).collect()
-  }
   match hint {
-    Some(is) if propagate_hint(&ls, ctx, is, strict, p) => Some(finish(ctx, p)),
-    _ if propagate(ls, ctx, p) => Some(finish(ctx, p)),
+    Some(is) if propagate_hint(&ls, ctx, is, strict, p) => Some(p.minimized_hint(ctx)),
+    _ if propagate(ls, ctx, p) => Some(p.minimized_hint(ctx)),
     _ => None
   }
 }
