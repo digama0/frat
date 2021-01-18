@@ -1,7 +1,6 @@
 use std::io::{self, Read, BufReader, Write, BufWriter};
 use std::fs::{File, read_to_string};
 use std::convert::TryInto;
-use std::collections::VecDeque;
 use std::mem;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 use std::collections::HashMap;
@@ -15,10 +14,10 @@ use super::parser::{detect_binary, Step, StepRef, ElabStep, Segment,
 use super::backparser::{VecBackParser, BackParser, StepIter, ElabStepIter};
 use super::perm_clause::*;
 
-// Set this to true to get an error log when unit propagation fails
+// Set this to true to get an error log when unit propagation fails (assumes no RAT steps)
 const LOG_UNIT_PROP_ERROR: bool = false;
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, PartialEq, Eq)]
 struct Reason(usize);
 
 impl Reason {
@@ -27,28 +26,47 @@ impl Reason {
   fn clause(self) -> Option<usize> { self.0.checked_sub(1) }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum Assign { No = 0, Yes = 1, Mark = 2 }
+
+impl Default for Assign {
+  fn default() -> Self { Self::No }
+}
+impl Assign {
+  #[inline] fn assigned(self) -> bool { self != Self::No }
+}
+
 #[derive(Default)]
 struct VAssign {
-  tru_lits: MidVec<bool>,
+  tru_lits: MidVec<Assign>,
   reasons: MidVec<Reason>,
   tru_stack: Vec<i64>,
+  first_hyp: usize,
+  first_unprocessed: usize,
+  units_processed: bool,
 }
 
 impl VAssign {
-  fn clear(&mut self) {
-    for i in self.tru_stack.drain(..) {
-      self.tru_lits[i] = false;
+  fn clear_hyps(&mut self) {
+    for i in self.tru_stack.drain(self.first_hyp..) {
+      self.tru_lits[i] = Assign::No;
       self.reasons[i] = Reason::NONE;
     }
+    self.first_unprocessed = self.first_unprocessed.min(self.first_hyp);
   }
 
-  fn reserve_clear(&mut self, max: i64) {
-    self.clear();
-    self.tru_lits.reserve_cleared(max);
-    self.reasons.reserve_cleared(max);
+  fn reserve_to(&mut self, max: i64) {
+    self.tru_lits.reserve_to(max);
+    self.reasons.reserve_to(max);
   }
 
-  #[inline] fn is_true(&self, l: i64) -> bool { self.tru_lits[l] }
+  fn unsat(&self) -> Option<i64> {
+    let k = *self.tru_stack.last()?;
+    if self.is_false(k) {Some(k)} else {None}
+  }
+
+  #[inline] fn is_true(&self, l: i64) -> bool { self.tru_lits[l].assigned() }
   #[inline] fn is_false(&self, l: i64) -> bool { self.is_true(-l) }
 
   // Attempt to update the variable assignment and make l true under it.
@@ -56,15 +74,41 @@ impl VAssign {
   // Otherwise, update and return true.
   fn assign(&mut self, l: i64, reason: Reason) -> bool {
     if self.is_true(l) { return true }
-    if self.is_false(l) {
-      self.reasons[l] = reason;
-      self.tru_stack.push(l);
-      return false
-    }
     self.reasons[l] = reason;
-    self.tru_lits[l] = true;
+    self.tru_lits[l] = Assign::Yes;
     self.tru_stack.push(l);
-    true
+    !self.is_false(l)
+  }
+
+  fn unassign(&mut self, lit: i64) {
+    debug_assert!(self.first_hyp == self.tru_stack.len(), "uncleared hypotheses");
+    if !self.is_true(lit) {return}
+    self.first_hyp = self.tru_stack.iter().rposition(|&l| lit == l)
+      .expect("couldn't find unit to unassign");
+    self.first_unprocessed = 0;
+    self.units_processed = false;
+    self.clear_hyps();
+  }
+
+  fn add_unit(&mut self, l: i64, cl: usize) {
+    debug_assert!(self.first_hyp == self.tru_stack.len(), "uncleared hypotheses");
+    if self.unsat().is_some() || self.is_true(l) {return}
+    self.reasons[l] = Reason::new(cl);
+    self.tru_lits[l] = Assign::Yes;
+    self.tru_stack.push(l);
+    self.first_hyp += 1;
+  }
+
+  // Return the next literal to be propagated, and indicate whether
+  // its propagation should be limited to marked/unmarked clauses
+  fn next_prop_lit(&mut self, unprocessed: &mut [usize; 2]) -> Option<(bool, i64)> {
+    if let Some(&l) = self.tru_stack.get(unprocessed[0]) {
+      unprocessed[0] += 1; return Some((true, l));
+    }
+    if let Some(&l) = self.tru_stack.get(unprocessed[1]) {
+      unprocessed[1] += 1; return Some((false, l));
+    }
+    None
   }
 }
 
@@ -97,11 +141,29 @@ impl IndexMut<usize> for Clause {
 }
 
 impl Clause {
-
   fn check_subsumed(&self, lits: &[i64], step: u64) {
     assert!(lits.iter().all(|lit| self.contains(lit)),
       "at {:?}: Clause {:?} added here will later be deleted as {:?}",
       step, self, lits)
+  }
+}
+
+#[derive(Default)]
+struct Watches(MidVec<Vec<usize>>);
+
+impl Watches {
+  fn del(&mut self, l: i64, i: usize) {
+    // eprintln!("remove watch: {:?} for {:?}", l, i);
+    let vec = &mut self.0[l];
+    if let Some(i) = vec.iter().position(|x| *x == i) {
+      vec.swap_remove(i);
+      return
+    }
+    panic!("Literal {} not watched in clause {}", l, i);
+  }
+  #[inline] fn add(&mut self, l: i64, id: usize) {
+    // eprintln!("add watch: {:?} for {:?}", l, id);
+    self.0[l].push(id);
   }
 }
 
@@ -111,23 +173,9 @@ struct Context {
   clauses: Slab<Clause>,
   names: HashMap<u64, usize>,
   units: HashMap<usize, i64>,
-  watch: Option<MidVec<Vec<usize>>>,
+  watch: Watches,
   va: VAssign,
-  step: u64
-}
-
-fn del_watch(watch: &mut MidVec<Vec<usize>>, l: i64, i: usize, clauses: &Slab<Clause>) {
-  // eprintln!("remove watch: {:?} for {:?}", l, i);
-  let vec = &mut watch[l];
-  if let Some(i) = vec.iter().position(|x| *x == i) {
-    vec.swap_remove(i);
-    return
-  }
-  panic!("Literal {} not watched in clause {} = {:?}", l, i, clauses[i].name);
-}
-#[inline] fn add_watch(watch: &mut MidVec<Vec<usize>>, l: i64, id: usize) {
-  // eprintln!("add watch: {:?} for {:?}", l, id);
-  watch[l].push(id);
+  step: u64,
 }
 
 fn dedup_vec<T: PartialEq>(vec: &mut Vec<T>) {
@@ -141,54 +189,64 @@ fn dedup_vec<T: PartialEq>(vec: &mut Vec<T>) {
   }
 }
 
-fn init_watch<'a, 'b>(w: &'a mut Option<MidVec<Vec<usize>>>, max_var: i64, cl: &Slab<Clause>) -> &'a mut MidVec<Vec<usize>> {
-  w.get_or_insert_with(move || {
-    let mut watch = MidVec::with_capacity(2 * max_var);
-    for (i, c) in cl {
-      if let [l1, l2, ..] = **c {
-        add_watch(&mut watch, l1, i);
-        add_watch(&mut watch, l2, i);
+impl Context {
+  fn sort_size(&self, lits: &mut [i64]) -> (bool, usize) {
+    let mut size = 0;
+    let mut sat = false;
+    for last in 0..lits.len() {
+      let lit = lits[last];
+      if !self.va.is_false(lit) {
+        sat |= self.va.is_true(lit);
+        lits.swap(last, size);
+        size += 1;
       }
     }
-    watch
-  })
-}
+    (sat, size)
+  }
 
-impl Context {
-  fn insert(&mut self, name: u64, marked: bool, lits: Box<[i64]>) {
+  fn insert(&mut self, name: u64, marked: bool, mut lits: Box<[i64]>) {
     for &lit in &*lits {
       self.max_var = self.max_var.max(lit.abs())
     }
-    if let Some(w) = &mut self.watch { w.reserve_to(self.max_var) }
+    self.va.reserve_to(self.max_var);
+    self.watch.0.reserve_to(self.max_var);
+    let unit = self.sort_size(&mut lits) == (false, 1);
     let i = self.clauses.insert(Clause {marked, name, lits});
     assert!(self.names.insert(name, i).is_none(),
       "at {:?}: Clause {} to be inserted already exists", self.step, name);
-    match *self.clauses[i].lits {
+    let lits = &*self.clauses[i];
+    match *lits {
       [] => {}
-      [l] => { self.units.insert(i, l); }
-      [l1, l2, ..] => if let Some(w) = &mut self.watch {
-        add_watch(w, l1, i);
-        add_watch(w, l2, i);
+      [l] => assert!(self.units.insert(i, l).is_none()),
+      [l1, l2, ..] => {
+        self.watch.add(l1, i);
+        self.watch.add(l2, i);
       }
     }
+    if unit { self.va.add_unit(lits[0], i); }
   }
 
   fn remove(&mut self, name: u64) -> Clause {
     let i = self.names.remove(&name).unwrap_or_else(
       || panic!("at {:?}: Clause {} to be removed does not exist", self.step, name));
 
-    let clause = self.clauses.remove(i);
-
-    match *clause {
+    let cl = &self.clauses[i];
+    match **cl {
       [] => {}
-      [_] => { self.units.remove(&i); }
-      [l1, l2, ..] => if let Some(w) = &mut self.watch {
-        del_watch(w, l1, i, &self.clauses);
-        del_watch(w, l2, i, &self.clauses);
+      [l] => {
+        self.va.unassign(l);
+        self.units.remove(&i).expect("unit not found");
+      }
+      [l1, l2, ..] => {
+        self.watch.del(l1, i);
+        self.watch.del(l2, i);
+        if self.va.reasons[l1] == Reason::new(i) {
+          self.va.unassign(l1)
+        }
       }
     }
 
-    clause
+    self.clauses.remove(i)
   }
 
   fn reloc(&mut self, relocs: &mut Vec<(u64, u64)>) {
@@ -211,91 +269,94 @@ impl Context {
     *self.names.get(&i).unwrap_or_else(
       || panic!("at {:?}: Clause {} to be accessed does not exist", self.step, i))
   }
-}
 
-// Return the next literal to be propagated, and indicate whether
-// its propagation should be limited to marked/unmarked clauses
-fn next_prop_lit([ls0, ls1]: &mut [VecDeque<i64>; 2]) -> Option<(bool, i64)> {
-  if let Some(l) = ls0.pop_front() { return Some((true, l)); }
-  if let Some(l) = ls1.pop_front() { return Some((false, l)); }
-  None
-}
-
-#[derive(Copy, Clone)]
-struct PStep(usize);
-
-impl PStep {
-  #[inline] fn new(s: usize) -> Self { Self(s << 1) }
-  #[inline] fn clause(self) -> usize { self.0 >> 1 }
-  #[inline] fn mark(&mut self) { self.0 |= 1 }
-  #[inline] fn marked(self) -> bool { self.0 & 1 != 0 }
-}
-
-#[derive(Default)]
-struct Solver {
-  ctx: Context,
-  ls: [VecDeque<i64>; 2],
-  steps: Vec<PStep>,
-}
-
-impl Solver {
-  fn minimized_hint(&mut self) -> Vec<i64> {
-    let Self {ctx, steps, ..} = self;
-    steps.last_mut().unwrap_or_else(
-      || panic!("at {:?}: minimizing empty hint", ctx.step)).mark();
-
-    for i in (0..steps.len()).rev() {
-      let s = steps[i];
-      if s.marked() {
-        for &l in &*ctx.clauses[s.clause()] {
-          if let Some(j) = ctx.va.reasons[-l].clause() {steps[j].mark()}
+  fn finalize_hint(&mut self) -> Vec<i64> {
+    let mut ret = vec![];
+    assert!(self.va.unsat().is_some());
+    for &lit in self.va.tru_stack.iter().rev() {
+      if let Assign::Mark = self.va.tru_lits[lit] {
+        self.va.tru_lits[lit] = Assign::Yes;
+        if let Some(c) = self.va.reasons[lit].clause() {
+          ret.push(self.clauses[c].name as i64);
+          for &l in &self.clauses[c].lits[1..] {
+            debug_assert!(self.va.is_true(-l),
+              "at {:?}: {} is unjustified", self.step, -l);
+            self.va.tru_lits[-l] = Assign::Mark
+          }
         }
       }
     }
-    steps.iter().filter(|&i| i.marked())
-      .map(|&i| ctx.clauses[i.clause()].name as i64).collect()
+    ret.reverse();
+    // debug_assert!(!ret.is_empty(), "at {}: empty hint or tautologous clause", self.step);
+    // debug_assert!(
+    //   self.va.tru_lits.enum_iter().all(|(_, &a)| a != Assign::Mark),
+    //   "at {:?}: {:?} are marked", self.step,
+    //   self.va.tru_lits.enum_iter().filter(|&(_, &a)| a != Assign::Mark)
+    //     .map(|x| x.0).collect::<Vec<_>>());
+    self.va.clear_hyps();
+    ret
   }
 
-  fn propagate(&mut self, c: &[i64]) -> bool {
-    let Self {ctx, ls, steps, ..} = self;
-    let Context {
-      ref mut watch, max_var, ref mut clauses,
-      ref mut va, ref units, ..} = *ctx;
-    ls[0].clear();
-    ls[1].clear();
-    steps.clear();
-    va.reserve_clear(max_var);
-
-    macro_rules! push {($i:expr) => {(steps.len(), steps.push(PStep::new($i))).0}}
-
-    for l in c {
-      ls[0].push_back(-l);
-      ls[1].push_back(-l);
-      if !va.assign(-l, Reason::NONE) { return true }
+  #[allow(unused)]
+  fn self_test(&mut self) {
+    'a: for (_, c) in &self.clauses {
+      let mut lits = 0;
+      for lit in c {
+        if self.va.is_true(lit) { continue 'a }
+        else if !self.va.is_false(lit) { lits += 1 }
+      }
+      if lits <= 1 {
+        let msg = format!("at {}: Unit propagation missed unit {:?}", self.step, c);
+        let _ = self.log_status("unit_prop_error.log", &[]);
+        panic!("{}", msg);
+      }
     }
 
-    for (&i, &l) in units {
-      ls[0].push_back(l);
-      ls[1].push_back(l);
-      if !va.assign(l, Reason::new(push!(i))) { return true }
+    for (addr, cl) in &self.clauses {
+      if let [a, b, ..] = *cl.lits {
+        for &l in &[a, b] {
+          if !self.watch.0[l].contains(&addr) {
+            let msg = format!("at {}: Watch {} not watching clause {}", self.step, l, cl.name);
+            let _ = self.log_status("unit_prop_error.log", &[]);
+            panic!("{}", msg);
+          }
+        }
+      }
+    }
+  }
+
+  fn propagate_core(&mut self) -> bool {
+    let root = self.va.first_hyp >= self.va.tru_stack.len();
+    // if verb {
+    //   println!("{}: propagate_core {} {:?}", self.step, root,
+    //     &self.va.tru_stack[self.va.first_unprocessed..]);
+    //   let _ = self.log_status("unit_prop_before.log", &[]);
+    // }
+
+    let Context {watch, clauses, va, ..} = self;
+
+    debug_assert!(!va.unsat().is_some());
+
+    if !va.units_processed {
+      debug_assert!(root);
+      for (&c, &l) in &self.units {
+        if !va.is_true(l) { va.add_unit(l, c) }
+      }
+      va.units_processed = true;
     }
 
-    let watch = init_watch(watch, max_var, clauses);
-
+    let mut unprocessed = [va.first_unprocessed; 2];
     // Main unit propagation loop
-    while let Some((m, l)) = next_prop_lit(ls) {
+    while let Some((m, l)) = va.next_prop_lit(&mut unprocessed) {
+      // m indicates propagation targets (m == true for marked clauses),
+      // and l is an unprocessed true literal, meaning that it has been set but
+      // we have not yet propagated it.
+
       // 'is' contains the IDs of all clauses containing -l
-      let mut is = &*watch[-l];
+      let mut is = &*watch.0[-l];
       let mut wi = 0..;
       while let Some(&i) = is.get(wi.next().unwrap()) {
         let cl = &mut clauses[i];
-
-        // m indicates propagation targets (m == true for marked clauses),
-        // va is the current variable assignment, and i is the ID of a clause
-        // which may potentially be unit under va. If c is verified under va,
-        // do nothing and return None. If c is not verified but contains two
-        // or more undecided literals, watch them and go to the next clause. Otherwise,
-        // let k be a new unit literal.
 
         // We process marked and unmarked clauses in two separate passes.
         // If this clause is in the wrong class then skip.
@@ -313,8 +374,6 @@ impl Solver {
           if a == -l {cl.swap(0, 1)}
         } else { unreachable!("watched clauses should be at least binary") }
 
-        if cl.iter().any(|&l| va.is_true(l)) {continue}
-
         // Since -l has just been falsified, we need a new watch literal to replace it.
         // Let j be another literal in the clause that has not been falsified.
         if let Some(j) = (2..cl.len()).find(|&i| !va.is_false(cl[i])) {
@@ -322,12 +381,12 @@ impl Solver {
 
           cl.swap(1, j); // Replace the -l literal with cl[j]
           let k = cl[1]; // let k be the new literal
-          del_watch(watch, -l, i, clauses); // remove this clause from the -l watch list
-          add_watch(watch, k, i); // and add it to the k watch list
+          watch.del(-l, i); // remove this clause from the -l watch list
+          watch.add(k, i); // and add it to the k watch list
 
           // Since we just modified the -l watch list, that we are currently iterating
           // over, we have to tweak the iterator so that we don't miss anything.
-          wi.start -= 1; is = &*watch[-l];
+          wi.start -= 1; is = &watch.0[-l];
 
           // We're done here, we didn't find a new unit
           continue
@@ -339,32 +398,77 @@ impl Solver {
         // have a new unit, or if k is falsified then we proved false and can finish.
         let k = cl[0];
 
-        // Push the new unit on the chain
-        if !va.assign(k, Reason::new(push!(i))) {
+        // Push the new unit on the chain. Note that the pivot literal,
+        // the one that this clause is the reason for, must be at index 0.
+        if !va.assign(k, Reason::new(i)) {
           // if we find a contradiction then exit
+          va.tru_lits[k] = Assign::Mark;
+          va.tru_lits[-k] = Assign::Mark;
+          va.first_unprocessed = va.tru_stack.len();
+          if root { va.first_hyp = va.tru_stack.len() }
           return true
         }
 
-        // Otherwise, put k on the work lists and go to the next clause.
-        ls[0].push_back(k);
-        ls[1].push_back(k);
+        // Otherwise, go to the next clause.
       }
+    }
+    va.first_unprocessed = va.tru_stack.len();
+    if root { va.first_hyp = va.tru_stack.len() }
+
+    // self.self_test();
+
+    // if verb {
+    //   let _ = self.log_status("unit_prop_error.log", &[]);
+    // }
+
+    // If there are no more literals to propagate, unit propagation has failed
+    false
+  }
+
+  fn propagate(&mut self, c: &[i64]) -> bool {
+    // if verb {
+    //   println!("propagate {:?}", c);
+    //   let _ = self.log_status("unit_prop_before.log", c);
+    // }
+
+    debug_assert!(self.va.first_hyp == self.va.tru_stack.len(), "uncleared hypotheses");
+
+    if let Some(k) = self.va.unsat() {
+      self.va.tru_lits[k] = Assign::Mark;
+      self.va.tru_lits[-k] = Assign::Mark;
+      return true
+    }
+
+    if !self.va.units_processed || self.va.first_unprocessed < self.va.tru_stack.len() {
+      if self.propagate_core() { return true }
+    }
+
+    if !c.is_empty() {
+      for &l in c {
+        if !self.va.assign(-l, Reason::NONE) {
+          self.va.tru_lits[l] = Assign::Mark;
+          return true
+        }
+      }
+
+      if self.propagate_core() { return true }
     }
 
     // If there are no more literals to propagate, unit propagation has failed
     if LOG_UNIT_PROP_ERROR {
-      let _ = self.propagate_stuck(c);
-      panic!("Unit propagation stuck, cannot add clause {:?}", c)
+      let _ = self.log_status("unit_prop_error.log", c);
+      panic!("at {}: Unit propagation stuck, cannot add clause {:?}", self.step, c)
     }
     false
   }
 
   #[allow(unused)]
-  fn propagate_stuck(&self, c: &[i64]) -> io::Result<()> {
-    let Self {ctx: Context {va, clauses, units, ..}, steps, ..} = self;
+  fn log_status(&self, file: &str, c: &[i64]) -> io::Result<()> {
+    let Self {va, clauses, units, ..} = self;
     // If unit propagation is stuck, write an error log
-    let mut log = BufWriter::new(File::create("unit_prop_error.log")?);
-    writeln!(log, "Clauses available at failure ((l) means false, [l] means true):")?;
+    let mut log = BufWriter::new(File::create(file)?);
+    writeln!(log, "Step {}\n", self.step)?;
+    writeln!(log, "Clauses available ((l) means false, [l] means true):")?;
     for (addr, c) in clauses {
       write!(log, "{:?}: {} = ", addr, c.name)?;
       let mut sat = false;
@@ -386,79 +490,119 @@ impl Solver {
         _ => ""
       })?;
     }
-    writeln!(log, "\nRecorded steps at failure: {:?}",
-      steps.iter().map(|i| i.clause()).collect::<Box<[_]>>())?;
-    writeln!(log, "\nObtained unit literals at failure:")?;
-    for &lit in &va.tru_stack {
+    writeln!(log, "\nObtained unit literals{}:",
+      if va.units_processed {""} else {" (not all units have not been populated)"})?;
+    for (i, &lit) in va.tru_stack.iter().enumerate() {
       assert!(va.is_true(lit));
-      writeln!(log, "{}: {:?}", lit,
-        va.reasons[lit].clause().map(|i| self.steps[i].clause()))?;
+      writeln!(log, "[{}] {}: {:?}{}{}{}", i, lit,
+        va.reasons[lit].clause().map(|c| &clauses[c]),
+        if i >= va.first_unprocessed {" (unprocessed)"} else {""},
+        if i >= va.first_hyp {" (hypothetical)"} else {""},
+        match va.tru_lits[lit] {
+          Assign::No => " (BUG: unassigned)",
+          Assign::Yes => "",
+          Assign::Mark => " (marked)"
+        })?;
     }
-    writeln!(log, "\nFailed to add clause: {:?}", c)?;
+    if !c.is_empty() {
+      writeln!(log, "\nTarget clause: {:?}", c)?;
+    }
     log.flush()
   }
 
   fn propagate_hint(&mut self, ls: &[i64], is: &[i64], strict: bool) -> bool {
-    let Self {steps, ctx, ..} = self;
-    steps.clear();
-    ctx.va.reserve_clear(ctx.max_var);
+    // if verb {
+    //   println!("propagate_hint {:?} {:?}", ls, is);
+    //   let _ = self.log_status("unit_prop_before.log", ls);
+    // }
 
-    for &x in ls {
-      assert!(ctx.va.assign(-x, Reason::NONE), "tautologous clause");
+    debug_assert!(self.va.first_hyp == self.va.tru_stack.len(), "uncleared hypotheses");
+
+    if let Some(k) = self.va.unsat() {
+      self.va.tru_lits[k] = Assign::Mark;
+      self.va.tru_lits[-k] = Assign::Mark;
+      return true
     }
 
-    let mut is: Vec<usize> = is.iter().map(|&i| ctx.get(i as u64)).collect();
+    if !self.va.units_processed {
+      for (&c, &l) in &self.units {
+        if !self.va.is_true(l) { self.va.add_unit(l, c) }
+      }
+      self.va.units_processed = true;
+    }
+
+    for &x in ls {
+      if !self.va.assign(-x, Reason::NONE) {
+        self.va.tru_lits[x] = Assign::Mark;
+        return true
+      }
+    }
+
+    let mut is: Vec<usize> = is.iter().map(|&i| self.get(i as u64)).collect();
+    let Context {va, clauses, watch, ..} = self;
     let mut queue = vec![];
     loop {
-      let len = is.len();
-      'a: for c in is.drain(..) {
-        let mut uf: Option<i64> = None;
-        let cl = &*ctx.clauses[c];
-        for &l in cl {
-          if !ctx.va.is_false(l) && uf.replace(l).is_some() {
-            assert!(!strict, "at {:?}: clause {:?} is not unit", ctx.step, c);
+      let mut progress = false;
+      for c in is.drain(..) {
+        let cl = &mut clauses[c];
+        if cl.iter().any(|&l| va.is_true(l)) {
+          continue
+        }
+        let k;
+        let unsat = if let Some(i) = (1..cl.len()).find(|&i| !va.is_false(cl[i])) {
+          let l = cl[0];
+          if !va.is_false(l) || cl.lits[i+1..].iter().any(|&l| !va.is_false(l)) {
+            assert!(!strict, "at {:?}: clause {:?} is not unit", self.step, cl.name);
             queue.push(c);
-            continue 'a
+            continue
           }
+          cl.swap(0, i);
+          k = cl[0];
+          if i > 1 {
+            watch.del(l, c);
+            watch.add(k, c);
+          }
+          false
+        } else { k = cl[0]; va.is_false(k) };
+        assert!(va.assign(k, Reason::new(c)) == !unsat);
+        if unsat {
+          va.tru_lits[k] = Assign::Mark;
+          va.tru_lits[-k] = Assign::Mark;
+          return true
         }
-        match uf {
-          None => {
-            steps.push(PStep::new(c));
-            return true
-          },
-          Some(l) => assert!(
-            ctx.va.assign(l, Reason::new((steps.len(), steps.push(PStep::new(c))).0)),
-            "l is not assigned"),
-        }
+        progress = true;
       }
-      if queue.len() >= len {return false}
+      if !progress {
+        self.va.clear_hyps();
+        return false
+      }
       mem::swap(&mut is, &mut queue);
     }
   }
 
   fn build_step(&mut self, ls: &[i64], hint: Option<&[i64]>, strict: bool) -> Option<Vec<i64>> {
     match hint {
-      Some(is) if self.propagate_hint(&ls, is, strict) => Some(self.minimized_hint()),
-      _ if self.propagate(ls) => Some(self.minimized_hint()),
+      Some(is) if self.propagate_hint(ls, is, strict) => Some(self.finalize_hint()),
+      _ if self.propagate(ls) => Some(self.finalize_hint()),
       _ => None
     }
   }
 
-  fn run_rat_step<'a>(&mut self, ls: &[i64], init: &[i64],
+  fn run_rat_step<'a>(&mut self, ls: &[i64], init: Option<&[i64]>,
       mut rats: Option<(&'a i64, &'a [i64])>, strict: bool) -> Vec<i64> {
     if rats.is_none() {
-      if let Some(res) = self.build_step(ls, if init.is_empty() {None} else {Some(init)}, strict) {
+      if let Some(res) = self.build_step(ls, init, strict) {
         return res
       }
     }
-    let _ = self.propagate_hint(&ls, init, strict);
+    let _ = self.propagate_hint(&ls, init.unwrap_or(&[]), strict);
     let pivot = ls[0];
-    let ls2: Vec<i64> = self.ctx.va.tru_stack.iter()
+    let ls2: Vec<i64> = self.va.tru_stack.iter()
       .map(|&i| -i).filter(|&i| i != pivot).collect();
     let mut proofs = HashMap::new();
     let mut order = vec![];
     while let Some((&s, rest)) = rats {
-      let step = self.ctx.get(-s as u64);
+      let step = self.get(-s as u64);
       order.push(step);
       match rest.iter().position(|&i| i < 0) {
         None => {
@@ -474,17 +618,16 @@ impl Solver {
     }
     let mut steps = vec![];
     let mut todo = vec![];
-    for (c, cl) in &self.ctx.clauses {
-      if cl.lits.contains(&-pivot) {
-        let mut resolvent = ls2.clone();
-        resolvent.extend(cl.lits.iter().cloned().filter(|&i| i != -pivot));
-        match proofs.get(&c) {
-          Some(&chain) => todo.push((c, resolvent, Some(chain))),
-          None if strict => panic!("Clause {:?} not in LRAT trace", cl.lits),
-          None => {
-            order.push(c);
-            todo.push((c, resolvent, None));
-          }
+    for &c in &self.watch.0[-pivot] {
+      let cl = &self.clauses[c];
+      let mut resolvent = ls2.clone();
+      resolvent.extend(cl.lits.iter().cloned().filter(|&i| i != -pivot));
+      match proofs.get(&c) {
+        Some(&chain) => todo.push((c, resolvent, Some(chain))),
+        None if strict => panic!("Clause {:?} not in LRAT trace", cl.lits),
+        None => {
+          order.push(c);
+          todo.push((c, resolvent, None));
         }
       }
     }
@@ -494,7 +637,7 @@ impl Solver {
 
     for c in order {
       let mut chain = proofs.remove(&c).unwrap();
-      steps.push(-(self.ctx.clauses[c].name as i64));
+      steps.push(-(self.clauses[c].name as i64));
       steps.append(&mut chain);
     }
     steps
@@ -503,15 +646,15 @@ impl Solver {
 
 fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Result<()> {
   let mut origs = Vec::new();
-  let solv = &mut Solver::default();
+  let ctx = &mut Context::default();
   for s in StepIter(BackParser::new(mode, frat)?) {
     // eprintln!("<- {:?}", s);
     match s {
 
       Step::Orig(i, ls) => {
-        solv.ctx.step = i;
-        let c = solv.ctx.remove(i);
-        c.check_subsumed(&ls, solv.ctx.step);
+        ctx.step = i;
+        let c = ctx.remove(i);
+        c.check_subsumed(&ls, ctx.step);
         if full || c.marked {  // If the original clause is marked
           origs.push((i, c.lits)); // delay origs to the end
         }
@@ -519,24 +662,24 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
       }
 
       Step::Add(i, ls, p) => {
-        solv.ctx.step = i;
-        let c = solv.ctx.remove(i);
-        c.check_subsumed(&ls, solv.ctx.step);
+        ctx.step = i;
+        let c = ctx.remove(i);
+        c.check_subsumed(&ls, ctx.step);
         if full || c.marked {
           let steps: Vec<i64> = if let Some(Proof::LRAT(is)) = p {
             if let Some(start) = is.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
               let (init, rest) = is.split_at(start);
-              solv.run_rat_step(&c, init, rest.split_first(), false)
+              ctx.run_rat_step(&c, Some(init), rest.split_first(), false)
             } else {
-              solv.run_rat_step(&c, &is, None, false)
+              ctx.run_rat_step(&c, Some(&is), None, false)
             }
           } else {
-            solv.run_rat_step(&c, &[], None, false)
+            ctx.run_rat_step(&c, None, None, false)
           };
           for &i in &steps {
             let i = i.abs() as u64;
-            let c = solv.ctx.get(i);
-            let cl = &mut solv.ctx.clauses[c];
+            let c = ctx.get(i);
+            let cl = &mut ctx.clauses[c];
             // let v = cs.get_mut(&i).unwrap();
             if !cl.marked { // If the necessary clause is not active yet
               cl.marked = true; // Make it active
@@ -551,24 +694,26 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
       }
 
       Step::Reloc(mut relocs) => {
-        solv.ctx.reloc(&mut relocs);
+        ctx.reloc(&mut relocs);
         if !relocs.is_empty() {
           ElabStep::Reloc(relocs).write(w).expect("Failed to write reloc step");
         }
       }
 
       Step::Del(i, mut ls) => {
+        ctx.step = i;
         dedup_vec(&mut ls);
-        solv.ctx.insert(i, false, ls.into());
+        ctx.insert(i, false, ls.into());
         if full {
           ElabStep::Del(i).write(w).expect("Failed to write delete step");
         }
       },
 
       Step::Final(i, mut ls) => {
+        ctx.step = i;
         // Identical to the Del case, except that the clause should be marked if empty
         dedup_vec(&mut ls);
-        solv.ctx.insert(i, ls.is_empty(), ls.into());
+        ctx.insert(i, ls.is_empty(), ls.into());
       }
 
       Step::Todo(_) => ()
@@ -781,17 +926,17 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
 fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8>) -> io::Result<()> {
   let lp = LRATParser::from(mode, lrat);
   let mut k = 0;
-  let solv = &mut Solver::default();
+  let ctx = &mut Context::default();
 
   for c in cnf {
     k += 1;
-    solv.ctx.step = k;
+    ctx.step = k;
     // eprintln!("{}: {:?}", k, c);
-    solv.ctx.insert(k, true, c);
+    ctx.insert(k, true, c);
   }
 
   for (i, s) in lp {
-    solv.ctx.step = i;
+    ctx.step = i;
     // eprintln!("{}: {:?}", i, s);
     match s {
 
@@ -801,17 +946,17 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
         // eprintln!("{}: {:?} {:?}", k, ls, p);
         if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
           let (init, rest) = p.split_at(start);
-          solv.run_rat_step(&ls, init, rest.split_first(), true);
+          ctx.run_rat_step(&ls, Some(init), rest.split_first(), true);
         } else {
-          solv.run_rat_step(&ls, &p, None, true);
+          ctx.run_rat_step(&ls, Some(&p), None, true);
         }
         if ls.is_empty() { return Ok(()) }
-        solv.ctx.insert(i, true, ls.into());
+        ctx.insert(i, true, ls.into());
       }
 
       LRATStep::Del(ls) => {
         assert!(i == k, "out-of-order LRAT proofs not supported");
-        for c in ls { solv.ctx.remove(c.try_into().unwrap()); }
+        for c in ls { ctx.remove(c.try_into().unwrap()); }
       }
     }
   }
