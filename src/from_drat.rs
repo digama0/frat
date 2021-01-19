@@ -18,8 +18,6 @@ fn from_drat(mode: impl Mode, cnf: Vec<Box<[i64]>>, drat: File, frat: File) -> i
   }
 
   for s in drat {
-    // eprintln!("{:?}", s);
-
     match s {
 
       DRATStep::Add(ls) => {
