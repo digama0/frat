@@ -270,31 +270,49 @@ impl Context {
       || panic!("at {:?}: Clause {} to be accessed does not exist", self.step, i))
   }
 
-  fn finalize_hint(&mut self) -> Vec<i64> {
-    let mut ret = vec![];
-    assert!(self.va.unsat().is_some());
-    for &lit in self.va.tru_stack.iter().rev() {
-      if let Assign::Mark = self.va.tru_lits[lit] {
-        self.va.tru_lits[lit] = Assign::Yes;
-        if let Some(c) = self.va.reasons[lit].clause() {
-          ret.push(self.clauses[c].name as i64);
-          for &l in &self.clauses[c].lits[1..] {
-            debug_assert!(self.va.is_true(-l),
-              "at {:?}: {} is unjustified", self.step, -l);
-            self.va.tru_lits[-l] = Assign::Mark
-          }
+  fn finalize_hint(&mut self, conflict: i64) -> Vec<i64> {
+    struct Finalize<'a> {
+      va: &'a mut VAssign,
+      #[cfg(debug)] step: u64,
+      clauses: &'a Slab<Clause>,
+      ret: Vec<i64>,
+      marks: Vec<i64>,
+    }
+
+    impl<'a> Finalize<'a> {
+      fn mark(&mut self, lit: i64) {
+        #[cfg(debug)] {
+          assert!(self.va.is_true(lit), "at {:?}: {} is unjustified", self.step, lit);
         }
+        if let Some(c) = self.va.reasons[lit].clause() {
+          for &l in &self.clauses[c].lits[1..] {
+            if !matches!(self.va.tru_lits[-l], Assign::Mark) { self.mark(-l) }
+          }
+          self.ret.push(self.clauses[c].name as i64);
+        }
+        self.va.tru_lits[lit] = Assign::Mark;
+        self.marks.push(lit);
       }
     }
-    ret.reverse();
-    // debug_assert!(!ret.is_empty(), "at {}: empty hint or tautologous clause", self.step);
-    // debug_assert!(
-    //   self.va.tru_lits.enum_iter().all(|(_, &a)| a != Assign::Mark),
-    //   "at {:?}: {:?} are marked", self.step,
-    //   self.va.tru_lits.enum_iter().filter(|&(_, &a)| a != Assign::Mark)
-    //     .map(|x| x.0).collect::<Vec<_>>());
-    self.va.clear_hyps();
-    ret
+
+    let mut fin = Finalize {
+      va: &mut self.va,
+      #[cfg(debug)] step: self.step,
+      clauses: &self.clauses,
+      ret: Vec::with_capacity(20),
+      marks: Vec::with_capacity(20),
+    };
+
+    fin.mark(conflict);
+    fin.mark(-conflict);
+
+    for lit in fin.marks { fin.va.tru_lits[lit] = Assign::Yes }
+
+    #[cfg(debug)] {
+      assert!(!fin.ret.is_empty(), "at {}: empty hint or tautologous clause", self.step);
+    }
+    fin.va.clear_hyps();
+    fin.ret
   }
 
   #[allow(unused)]
@@ -325,7 +343,7 @@ impl Context {
     }
   }
 
-  fn propagate_core(&mut self) -> bool {
+  fn propagate_core(&mut self) -> Option<i64> {
     let root = self.va.first_hyp >= self.va.tru_stack.len();
     // if verb {
     //   println!("{}: propagate_core {} {:?}", self.step, root,
@@ -402,11 +420,9 @@ impl Context {
         // the one that this clause is the reason for, must be at index 0.
         if !va.assign(k, Reason::new(i)) {
           // if we find a contradiction then exit
-          va.tru_lits[k] = Assign::Mark;
-          va.tru_lits[-k] = Assign::Mark;
           va.first_unprocessed = va.tru_stack.len();
           if root { va.first_hyp = va.tru_stack.len() }
-          return true
+          return Some(k)
         }
 
         // Otherwise, go to the next clause.
@@ -422,10 +438,10 @@ impl Context {
     // }
 
     // If there are no more literals to propagate, unit propagation has failed
-    false
+    None
   }
 
-  fn propagate(&mut self, c: &[i64]) -> bool {
+  fn propagate(&mut self, c: &[i64]) -> Option<i64> {
     // if verb {
     //   println!("propagate {:?}", c);
     //   let _ = self.log_status("unit_prop_before.log", c);
@@ -433,25 +449,21 @@ impl Context {
 
     debug_assert!(self.va.first_hyp == self.va.tru_stack.len(), "uncleared hypotheses");
 
-    if let Some(k) = self.va.unsat() {
-      self.va.tru_lits[k] = Assign::Mark;
-      self.va.tru_lits[-k] = Assign::Mark;
-      return true
-    }
+    if let Some(k) = self.va.unsat() { return Some(k) }
 
     if !self.va.units_processed || self.va.first_unprocessed < self.va.tru_stack.len() {
-      if self.propagate_core() { return true }
+      if let Some(k) = self.propagate_core() { return Some(k) }
     }
 
     if !c.is_empty() {
       for &l in c {
         if !self.va.assign(-l, Reason::NONE) {
           self.va.tru_lits[l] = Assign::Mark;
-          return true
+          return Some(l)
         }
       }
 
-      if self.propagate_core() { return true }
+      if let Some(k) = self.propagate_core() { return Some(k) }
     }
 
     // If there are no more literals to propagate, unit propagation has failed
@@ -459,7 +471,7 @@ impl Context {
       let _ = self.log_status("unit_prop_error.log", c);
       panic!("at {}: Unit propagation stuck, cannot add clause {:?}", self.step, c)
     }
-    false
+    None
   }
 
   #[allow(unused)]
@@ -510,7 +522,7 @@ impl Context {
     log.flush()
   }
 
-  fn propagate_hint(&mut self, ls: &[i64], is: &[i64], strict: bool) -> bool {
+  fn propagate_hint(&mut self, ls: &[i64], is: &[i64], strict: bool) -> Option<i64> {
     // if verb {
     //   println!("propagate_hint {:?} {:?}", ls, is);
     //   let _ = self.log_status("unit_prop_before.log", ls);
@@ -518,11 +530,7 @@ impl Context {
 
     debug_assert!(self.va.first_hyp == self.va.tru_stack.len(), "uncleared hypotheses");
 
-    if let Some(k) = self.va.unsat() {
-      self.va.tru_lits[k] = Assign::Mark;
-      self.va.tru_lits[-k] = Assign::Mark;
-      return true
-    }
+    if let Some(k) = self.va.unsat() { return Some(k) }
 
     if !self.va.units_processed {
       for (&c, &l) in &self.units {
@@ -532,10 +540,7 @@ impl Context {
     }
 
     for &x in ls {
-      if !self.va.assign(-x, Reason::NONE) {
-        self.va.tru_lits[x] = Assign::Mark;
-        return true
-      }
+      if !self.va.assign(-x, Reason::NONE) { return Some(x) }
     }
 
     let mut is: Vec<usize> = is.iter().map(|&i| self.get(i as u64)).collect();
@@ -565,27 +570,27 @@ impl Context {
           false
         } else { k = cl[0]; va.is_false(k) };
         assert!(va.assign(k, Reason::new(c)) == !unsat);
-        if unsat {
-          va.tru_lits[k] = Assign::Mark;
-          va.tru_lits[-k] = Assign::Mark;
-          return true
-        }
+        if unsat { return Some(k) }
         progress = true;
       }
       if !progress {
         self.va.clear_hyps();
-        return false
+        return None
       }
       mem::swap(&mut is, &mut queue);
     }
   }
 
   fn build_step(&mut self, ls: &[i64], hint: Option<&[i64]>, strict: bool) -> Option<Vec<i64>> {
-    match hint {
-      Some(is) if self.propagate_hint(ls, is, strict) => Some(self.finalize_hint()),
-      _ if self.propagate(ls) => Some(self.finalize_hint()),
-      _ => None
+    if let Some(is) = hint {
+      if let Some(k) = self.propagate_hint(ls, is, strict) {
+        return Some(self.finalize_hint(k))
+      }
     }
+    if let Some(k) = self.propagate(ls) {
+      return Some(self.finalize_hint(k))
+    }
+    None
   }
 
   fn run_rat_step<'a>(&mut self, ls: &[i64], init: Option<&[i64]>,
