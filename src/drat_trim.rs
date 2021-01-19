@@ -491,7 +491,7 @@ impl Solver {
 
   fn propagate_units(&mut self) -> bool {
     while let Some(i) = self.pop_forced() {
-      self.false_a[i] = Assign::Assigned;
+      self.false_a[i] = Assign::Unassigned;
       reason!(self, i) = Reason::NONE;
     }
     self.processed = 0; self.false_stack.clear();

@@ -293,10 +293,11 @@ impl Context {
           assert!(self.va.is_true(lit), "at {:?}: {} is unjustified", self.step, lit);
         }
         if let Some(c) = self.va.reasons[lit].clause() {
+          let step = self.clauses[c].name as i64;
           for &l in &self.clauses[c].lits[1..] {
             if !matches!(self.va.tru_lits[-l], Assign::Mark) { self.mark(-l) }
           }
-          self.ret.push(self.clauses[c].name as i64);
+          self.ret.push(step);
         }
         self.va.tru_lits[lit] = Assign::Mark;
         self.marks.push(lit);
