@@ -14,9 +14,6 @@ use super::parser::{detect_binary, Step, StepRef, ElabStep, ElabStepRef, Segment
 use super::backparser::{VecBackParser, BackParser, StepIter, ElabStepIter};
 use super::perm_clause::*;
 
-// Set this to true to get an error log when unit propagation fails (assumes no RAT steps)
-const LOG_UNIT_PROP_ERROR: bool = false;
-
 #[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 struct Reason(usize);
 
@@ -160,16 +157,12 @@ impl Watches {
   }
 
   fn del(&mut self, marked: bool, l: i64, i: usize) {
-    // eprintln!("remove watch: {:?} for {:?}", l, i);
     let vec = &mut self.watch_mut(marked)[l];
-    if let Some(i) = vec.iter().position(|x| *x == i) {
-      vec.swap_remove(i);
-      return
-    }
-    panic!("Literal {} not watched in clause {}", l, i);
+    let i = vec.iter().position(|x| *x == i).unwrap();
+    vec.swap_remove(i);
   }
+
   #[inline] fn add(&mut self, marked: bool, l: i64, id: usize) {
-    // eprintln!("add watch: {:?} for {:?}", l, id);
     self.watch_mut(marked)[l].push(id);
   }
 }
@@ -178,7 +171,6 @@ impl Watches {
 struct Hint {
   steps: Vec<i64>,
   temp: Vec<i64>,
-  // rat_set: HashMap<i64, usize>,
 }
 
 #[derive(Default)]
@@ -288,16 +280,12 @@ impl Context {
   fn finalize_hint(&mut self, conflict: i64, hint: &mut Hint) {
     struct Finalize<'a> {
       va: &'a mut VAssign,
-      #[cfg(debug)] step: u64,
       clauses: &'a Slab<Clause>,
       hint: &'a mut Hint,
     }
 
     impl<'a> Finalize<'a> {
       fn mark(&mut self, lit: i64) {
-        #[cfg(debug)] {
-          assert!(self.va.is_true(lit), "at {:?}: {} is unjustified", self.step, lit);
-        }
         if let Some(c) = self.va.reasons[lit].clause() {
           let step = self.clauses[c].name as i64;
           for &l in &self.clauses[c].lits[1..] {
@@ -312,7 +300,6 @@ impl Context {
 
     let mut fin = Finalize {
       va: &mut self.va,
-      #[cfg(debug)] step: self.step,
       clauses: &self.clauses,
       hint,
     };
@@ -325,47 +312,11 @@ impl Context {
       va.tru_lits[lit] = Assign::Yes
     }
 
-    debug_assert!(!hint.steps.is_empty(),
-      "at {}: empty hint or tautologous clause", self.step);
     va.clear_hyps();
-  }
-
-  #[allow(unused)]
-  fn self_test(&mut self) {
-    'a: for (_, c) in &self.clauses {
-      let mut lits = 0;
-      for lit in c {
-        if self.va.is_true(lit) { continue 'a }
-        else if !self.va.is_false(lit) { lits += 1 }
-      }
-      if lits <= 1 {
-        let msg = format!("at {}: Unit propagation missed unit {:?}", self.step, c);
-        let _ = self.log_status("unit_prop_error.log", &[]);
-        panic!("{}", msg);
-      }
-    }
-
-    for (addr, cl) in &self.clauses {
-      if let [a, b, ..] = *cl.lits {
-        for &l in &[a, b] {
-          if !self.watch.watch_mut(cl.marked)[l].contains(&addr) {
-            let msg = format!("at {}: Watch {} not watching clause {}", self.step, l, cl.name);
-            let _ = self.log_status("unit_prop_error.log", &[]);
-            panic!("{}", msg);
-          }
-        }
-      }
-    }
   }
 
   fn propagate_core(&mut self) -> Option<i64> {
     let root = self.va.first_hyp >= self.va.tru_stack.len();
-    // if verb {
-    //   println!("{}: propagate_core {} {:?}", self.step, root,
-    //     &self.va.tru_stack[self.va.first_unprocessed..]);
-    //   let _ = self.log_status("unit_prop_before.log", &[]);
-    // }
-
     let Context {watch, clauses, va, ..} = self;
 
     debug_assert!(!va.unsat().is_some());
@@ -410,8 +361,6 @@ impl Context {
         // Since -l has just been falsified, we need a new watch literal to replace it.
         // Let j be another literal in the clause that has not been falsified.
         if let Some(j) = (2..cl.len()).find(|&i| !va.is_false(cl[i])) {
-          // eprintln!("Working on clause {}: {:?} at {}", i, c, j);
-
           cl.swap(1, j); // Replace the -l literal with cl[j]
           let k = cl[1]; // let k be the new literal
           watch.del(m, -l, i); // remove this clause from the -l watch list
@@ -446,22 +395,11 @@ impl Context {
     va.first_unprocessed = va.tru_stack.len();
     if root { va.first_hyp = va.tru_stack.len() }
 
-    // self.self_test();
-
-    // if verb {
-    //   let _ = self.log_status("unit_prop_error.log", &[]);
-    // }
-
     // If there are no more literals to propagate, unit propagation has failed
     None
   }
 
   fn propagate(&mut self, c: &[i64]) -> Option<i64> {
-    // if verb {
-    //   println!("propagate {:?}", c);
-    //   let _ = self.log_status("unit_prop_before.log", c);
-    // }
-
     if let Some(k) = self.va.unsat() { return Some(k) }
 
     if !self.va.units_processed || self.va.first_unprocessed < self.va.tru_stack.len() {
@@ -480,67 +418,10 @@ impl Context {
     }
 
     // If there are no more literals to propagate, unit propagation has failed
-    if LOG_UNIT_PROP_ERROR {
-      let _ = self.log_status("unit_prop_error.log", c);
-      panic!("at {}: Unit propagation stuck, cannot add clause {:?}", self.step, c)
-    }
     None
   }
 
-  #[allow(unused)]
-  fn log_status(&self, file: &str, c: &[i64]) -> io::Result<()> {
-    let Self {va, clauses, units, ..} = self;
-    // If unit propagation is stuck, write an error log
-    let mut log = BufWriter::new(File::create(file)?);
-    writeln!(log, "Step {}\n", self.step)?;
-    writeln!(log, "Clauses available ((l) means false, [l] means true):")?;
-    for (addr, c) in clauses {
-      write!(log, "{:?}: {} = ", addr, c.name)?;
-      let mut sat = false;
-      let mut lits = 0;
-      for lit in c {
-        if va.is_true(lit) { write!(log, "[{}] ", lit)?; sat = true }
-        else if va.is_false(lit) { write!(log, "({}) ", lit)? }
-        else { lits += 1; write!(log, "{} ", lit)? }
-      }
-      if let [l] = **c {
-        if units.get(&addr) != Some(&l) {
-          write!(log, " (BUG: untracked unit clause)")?
-        }
-      }
-      writeln!(log, "{}", match (sat, lits) {
-        (true, _) => " (satisfied)",
-        (_, 0) => " (BUG: undetected falsified clause)",
-        (_, 1) => " (BUG: undetected unit clause)",
-        _ => ""
-      })?;
-    }
-    writeln!(log, "\nObtained unit literals{}:",
-      if va.units_processed {""} else {" (not all units have not been populated)"})?;
-    for (i, &lit) in va.tru_stack.iter().enumerate() {
-      assert!(va.is_true(lit));
-      writeln!(log, "[{}] {}: {:?}{}{}{}", i, lit,
-        va.reasons[lit].clause().map(|c| &clauses[c]),
-        if i >= va.first_unprocessed {" (unprocessed)"} else {""},
-        if i >= va.first_hyp {" (hypothetical)"} else {""},
-        match va.tru_lits[lit] {
-          Assign::No => " (BUG: unassigned)",
-          Assign::Yes => "",
-          Assign::Mark => " (marked)"
-        })?;
-    }
-    if !c.is_empty() {
-      writeln!(log, "\nTarget clause: {:?}", c)?;
-    }
-    log.flush()
-  }
-
   fn propagate_hint(&mut self, ls: &[i64], is: &[i64], strict: bool) -> Option<i64> {
-    // if verb {
-    //   println!("propagate_hint {:?} {:?}", ls, is);
-    //   let _ = self.log_status("unit_prop_before.log", ls);
-    // }
-
     if let Some(k) = self.va.unsat() { return Some(k) }
 
     if !self.va.units_processed {
@@ -607,61 +488,12 @@ impl Context {
   }
 
   fn run_rat_step<'a>(&mut self, ls: &[i64], init: Option<&[i64]>,
-      mut rats: Option<(&'a i64, &'a [i64])>, strict: bool, out: &mut Hint) {
+      rats: Option<(&'a i64, &'a [i64])>, strict: bool, out: &mut Hint) {
     out.steps.clear();
     if rats.is_none() {
       if self.build_step(ls, init, strict, out) { return }
     }
-    let _ = self.propagate_hint(&ls, init.unwrap_or(&[]), strict);
-    let pivot = ls[0];
-    let ls2: Vec<i64> = self.va.tru_stack.iter()
-      .map(|&i| -i).filter(|&i| i != pivot).collect();
-    let mut proofs = HashMap::new();
-    let mut order = vec![];
-    while let Some((&s, rest)) = rats {
-      let step = self.get(-s as u64);
-      order.push(step);
-      match rest.iter().position(|&i| i < 0) {
-        None => {
-          proofs.insert(step, rest);
-          break
-        }
-        Some(i) => {
-          let (chain, r) = rest.split_at(i);
-          proofs.insert(step, chain);
-          rats = r.split_first();
-        }
-      }
-    }
-    let mut todo = vec![];
-    for w in &self.watch.0 {
-      for &c in &w[-pivot] {
-        let cl = &self.clauses[c];
-        let mut resolvent = ls2.clone();
-        resolvent.extend(cl.lits.iter().cloned().filter(|&i| i != -pivot));
-        match proofs.get(&c) {
-          Some(&chain) => todo.push((c, resolvent, Some(chain))),
-          None if strict => panic!("Clause {:?} not in LRAT trace", cl.lits),
-          None => {
-            order.push(c);
-            todo.push((c, resolvent, None));
-          }
-        }
-      }
-    }
-
-    let mut proofs: HashMap<_, _> = todo.into_iter().map(|(c, resolvent, hint)| {
-      let old = mem::take(&mut out.steps);
-      assert!(self.build_step(&resolvent, hint, strict, out),
-        "Unit propagation stuck, cannot resolve clause {:?}", resolvent);
-      (c, mem::replace(&mut out.steps, old))
-    }).collect();
-
-    for c in order {
-      let mut chain = proofs.remove(&c).unwrap();
-      out.steps.push(-(self.clauses[c].name as i64));
-      out.steps.append(&mut chain);
-    }
+    unimplemented!("RAT steps are not available in this version, see the master branch")
   }
 }
 
@@ -670,7 +502,6 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
   let ctx = &mut Context::default();
   let hint = &mut Hint::default();
   for s in StepIter(BackParser::new(mode, frat)?) {
-    // eprintln!("<- {:?}", s);
     match s {
 
       Step::Orig(i, ls) => {
@@ -680,7 +511,6 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
         if full || c.marked {  // If the original clause is marked
           origs.push((i, c.lits)); // delay origs to the end
         }
-        // else { eprintln!("delete {}", i); }
       }
 
       Step::Add(i, ls, p) => {
@@ -702,7 +532,6 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
             let i = i.abs() as u64;
             let c = ctx.get(i);
             let cl = &mut ctx.clauses[c];
-            // let v = cs.get_mut(&i).unwrap();
             if !cl.marked { // If the necessary clause is not active yet
               cl.marked = true; // Make it active
               if let [a, b, ..] = *cl.lits {
@@ -718,7 +547,6 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
           }
           ElabStepRef::Add(i, &c.lits, &hint.steps).write(w).expect("Failed to write add step");
         }
-        // else { eprintln!("delete {}", i); }
       }
 
       Step::Reloc(mut relocs) => {
@@ -788,13 +616,11 @@ fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut imp
 
   while let Some(ElabStep::Orig(_, _)) = bp.peek() {
     if let Some(ElabStep::Orig(i, ls)) = bp.next() {
-      // eprintln!("-> Orig{:?}", (&i, &ls));
       let j = *cnf.get(&PermClauseRef(&ls)).unwrap_or_else( // Find position of clause in original problem
         || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls));
       let r = &mut used_origs[j as usize - 1];
       *r = r.saturating_add(1);
       assert!(map.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
-      // eprintln!("{} -> {}", i, j);
       if ls.is_empty() {
         writeln!(lrat, "{} 0 {} 0", k+1, j)?;
         return Ok(())
@@ -810,8 +636,6 @@ fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut imp
   })?;
 
   while let Some(s) = bp.next() {
-    // eprintln!("-> {:?}", s);
-
     match s {
 
       ElabStep::Orig(_, _) =>
@@ -820,7 +644,6 @@ fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut imp
       ElabStep::Add(i, ls, is) => {
         k += 1; // Get the next fresh ID
         map.insert(i, k); // The ID of added clause is mapped to a fresh ID
-        // eprintln!("{} -> {}", i, k);
         let done = ls.is_empty();
 
         write!(lrat, "{}", k)?;
@@ -960,19 +783,16 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
   for c in cnf {
     k += 1;
     ctx.step = k;
-    // eprintln!("{}: {:?}", k, c);
     ctx.insert(k, true, c);
   }
 
   for (i, s) in lp {
     ctx.step = i;
-    // eprintln!("{}: {:?}", i, s);
     match s {
 
       LRATStep::Add(ls, p) => {
         assert!(i > k, "out-of-order LRAT proofs not supported");
         k = i;
-        // eprintln!("{}: {:?} {:?}", k, ls, p);
         if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
           let (init, rest) = p.split_at(start);
           ctx.run_rat_step(&ls, Some(init), rest.split_first(), true, hint);
@@ -1004,8 +824,6 @@ fn refrat_pass(elab: File, w: &mut impl Write) -> io::Result<()> {
 
   let mut ctx: HashMap<u64, Vec<i64>> = HashMap::new();
   for s in ElabStepIter(BackParser::new(Bin, elab)?) {
-    // eprintln!("-> {:?}", s);
-
     match s {
 
       ElabStep::Orig(i, ls) => {
