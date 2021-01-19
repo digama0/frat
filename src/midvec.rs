@@ -22,12 +22,15 @@ impl<T: Default> MidVec<T> {
     Self::with_capacity_by(size, Default::default)
   }
 
-  pub fn reserve_to(&mut self, n: i64) {
+  #[inline] pub fn reserve_to(&mut self, n: i64) {
     if n > self.len() {
-      let new_size = n.max(self.len().checked_mul(2).unwrap());
-      for (i, v) in std::mem::replace(self, Self::with_capacity(new_size)) {
-        self[i] = v;
+      fn reserve_core<T: Default>(this: &mut MidVec<T>, n: i64) {
+        let new_size = n.max(this.len().checked_mul(2).unwrap());
+        for (i, v) in std::mem::replace(this, MidVec::with_capacity(new_size)) {
+          this[i] = v;
+        }
       }
+      reserve_core(self, n)
     }
   }
 
@@ -59,7 +62,7 @@ impl<T> MidVec<T> {
     }
   }
 
-  unsafe fn shallow_clone(&self) -> Self {
+  #[inline] unsafe fn shallow_clone(&self) -> Self {
     MidVec {size: self.size, center: self.center}
   }
 

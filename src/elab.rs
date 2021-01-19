@@ -149,21 +149,28 @@ impl Clause {
 }
 
 #[derive(Default)]
-struct Watches(MidVec<Vec<usize>>);
+struct Watches([MidVec<Vec<usize>>; 2]);
 
 impl Watches {
-  fn del(&mut self, l: i64, i: usize) {
+  #[inline] fn watch(&self, marked: bool) -> &MidVec<Vec<usize>> {
+    &self.0[marked as usize]
+  }
+  #[inline] fn watch_mut(&mut self, marked: bool) -> &mut MidVec<Vec<usize>> {
+    &mut self.0[marked as usize]
+  }
+
+  fn del(&mut self, marked: bool, l: i64, i: usize) {
     // eprintln!("remove watch: {:?} for {:?}", l, i);
-    let vec = &mut self.0[l];
+    let vec = &mut self.watch_mut(marked)[l];
     if let Some(i) = vec.iter().position(|x| *x == i) {
       vec.swap_remove(i);
       return
     }
     panic!("Literal {} not watched in clause {}", l, i);
   }
-  #[inline] fn add(&mut self, l: i64, id: usize) {
+  #[inline] fn add(&mut self, marked: bool, l: i64, id: usize) {
     // eprintln!("add watch: {:?} for {:?}", l, id);
-    self.0[l].push(id);
+    self.watch_mut(marked)[l].push(id);
   }
 }
 
@@ -209,7 +216,8 @@ impl Context {
       self.max_var = self.max_var.max(lit.abs())
     }
     self.va.reserve_to(self.max_var);
-    self.watch.0.reserve_to(self.max_var);
+    self.watch.0[0].reserve_to(self.max_var);
+    self.watch.0[1].reserve_to(self.max_var);
     let unit = self.sort_size(&mut lits) == (false, 1);
     let i = self.clauses.insert(Clause {marked, name, lits});
     assert!(self.names.insert(name, i).is_none(),
@@ -219,8 +227,8 @@ impl Context {
       [] => {}
       [l] => assert!(self.units.insert(i, l).is_none()),
       [l1, l2, ..] => {
-        self.watch.add(l1, i);
-        self.watch.add(l2, i);
+        self.watch.add(marked, l1, i);
+        self.watch.add(marked, l2, i);
       }
     }
     if unit { self.va.add_unit(lits[0], i); }
@@ -238,8 +246,8 @@ impl Context {
         self.units.remove(&i).expect("unit not found");
       }
       [l1, l2, ..] => {
-        self.watch.del(l1, i);
-        self.watch.del(l2, i);
+        self.watch.del(cl.marked, l1, i);
+        self.watch.del(cl.marked, l2, i);
         if self.va.reasons[l1] == Reason::new(i) {
           self.va.unassign(l1)
         }
@@ -333,7 +341,7 @@ impl Context {
     for (addr, cl) in &self.clauses {
       if let [a, b, ..] = *cl.lits {
         for &l in &[a, b] {
-          if !self.watch.0[l].contains(&addr) {
+          if !self.watch.watch_mut(cl.marked)[l].contains(&addr) {
             let msg = format!("at {}: Watch {} not watching clause {}", self.step, l, cl.name);
             let _ = self.log_status("unit_prop_error.log", &[]);
             panic!("{}", msg);
@@ -371,7 +379,7 @@ impl Context {
       // we have not yet propagated it.
 
       // 'is' contains the IDs of all clauses containing -l
-      let mut is = &*watch.0[-l];
+      let mut is = &*watch.watch(m)[-l];
       let mut wi = 0..;
       while let Some(&i) = is.get(wi.next().unwrap()) {
         let cl = &mut clauses[i];
@@ -399,12 +407,12 @@ impl Context {
 
           cl.swap(1, j); // Replace the -l literal with cl[j]
           let k = cl[1]; // let k be the new literal
-          watch.del(-l, i); // remove this clause from the -l watch list
-          watch.add(k, i); // and add it to the k watch list
+          watch.del(m, -l, i); // remove this clause from the -l watch list
+          watch.add(m, k, i); // and add it to the k watch list
 
           // Since we just modified the -l watch list, that we are currently iterating
           // over, we have to tweak the iterator so that we don't miss anything.
-          wi.start -= 1; is = &watch.0[-l];
+          wi.start -= 1; is = &watch.watch(m)[-l];
 
           // We're done here, we didn't find a new unit
           continue
@@ -564,8 +572,8 @@ impl Context {
           cl.swap(0, i);
           k = cl[0];
           if i > 1 {
-            watch.del(l, c);
-            watch.add(k, c);
+            watch.del(cl.marked, l, c);
+            watch.add(cl.marked, k, c);
           }
           false
         } else { k = cl[0]; va.is_false(k) };
@@ -623,16 +631,18 @@ impl Context {
     }
     let mut steps = vec![];
     let mut todo = vec![];
-    for &c in &self.watch.0[-pivot] {
-      let cl = &self.clauses[c];
-      let mut resolvent = ls2.clone();
-      resolvent.extend(cl.lits.iter().cloned().filter(|&i| i != -pivot));
-      match proofs.get(&c) {
-        Some(&chain) => todo.push((c, resolvent, Some(chain))),
-        None if strict => panic!("Clause {:?} not in LRAT trace", cl.lits),
-        None => {
-          order.push(c);
-          todo.push((c, resolvent, None));
+    for w in &self.watch.0 {
+      for &c in &w[-pivot] {
+        let cl = &self.clauses[c];
+        let mut resolvent = ls2.clone();
+        resolvent.extend(cl.lits.iter().cloned().filter(|&i| i != -pivot));
+        match proofs.get(&c) {
+          Some(&chain) => todo.push((c, resolvent, Some(chain))),
+          None if strict => panic!("Clause {:?} not in LRAT trace", cl.lits),
+          None => {
+            order.push(c);
+            todo.push((c, resolvent, None));
+          }
         }
       }
     }
@@ -688,6 +698,12 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
             // let v = cs.get_mut(&i).unwrap();
             if !cl.marked { // If the necessary clause is not active yet
               cl.marked = true; // Make it active
+              if let [a, b, ..] = *cl.lits {
+                ctx.watch.del(false, a, c);
+                ctx.watch.del(false, b, c);
+                ctx.watch.add(true, a, c);
+                ctx.watch.add(true, b, c);
+              }
               if !full {
                 ElabStep::Del(i).write(w).expect("Failed to write delete step");
               }
