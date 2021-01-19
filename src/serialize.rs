@@ -1,6 +1,6 @@
 use arrayvec::ArrayVec;
 use std::io::{self, Write};
-use super::parser::{Step, StepRef, ElabStep, ProofRef};
+use super::parser::{Step, StepRef, ElabStep, ElabStepRef, ProofRef};
 
 pub trait Serialize {
   fn write(&self, w: &mut impl Write) -> io::Result<()>;
@@ -65,14 +65,20 @@ impl Serialize for Step {
   }
 }
 
-impl Serialize for ElabStep {
+impl<'a> Serialize for ElabStepRef<'a> {
   fn write(&self, w: &mut impl Write) -> io::Result<()> {
     match *self {
-      ElabStep::Orig(idx, ref vec) => (b'o', (idx, &**vec)).write(w),
-      ElabStep::Add(idx, ref vec, ref steps) =>
-        ((b'a', (idx, &**vec)), (b'l', &**steps)).write(w),
-      ElabStep::Reloc(ref relocs) => (b'r', &**relocs).write(w),
-      ElabStep::Del(idx) => (b'd', (idx, 0u8)).write(w),
+      ElabStepRef::Orig(idx, vec) => (b'o', (idx, vec)).write(w),
+      ElabStepRef::Add(idx, vec, steps) =>
+        ((b'a', (idx, vec)), (b'l', steps)).write(w),
+      ElabStepRef::Reloc(relocs) => (b'r', relocs).write(w),
+      ElabStepRef::Del(idx) => (b'd', (idx, 0u8)).write(w),
     }
+  }
+}
+
+impl Serialize for ElabStep {
+  fn write(&self, w: &mut impl Write) -> io::Result<()> {
+    self.as_ref().write(w)
   }
 }

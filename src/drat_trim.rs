@@ -777,7 +777,6 @@ impl Solver {
             continue
           }
           rat_set.push(w.clause());
-          break
         }
       }
     }
@@ -793,7 +792,7 @@ impl Solver {
       if self.verb { println!("c RAT clause: {}", rat_cls) }
 
       for &lit in &**rat_cls {
-        if lit != -pivot && !self.false_a[-lit].assigned() {
+        if lit != -pivot && self.false_a[-lit].assigned() {
           if let Some(reason2) = reason!(self, lit).get() {
             if blocked.map_or(true, |(_, reason)| reason > reason2) {
               blocked = Some((lit, reason2));

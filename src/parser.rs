@@ -235,6 +235,24 @@ pub enum ElabStep {
   Del(u64),
 }
 
+#[derive(Debug, Clone)]
+pub enum ElabStepRef<'a> {
+  Orig(u64, &'a [i64]),
+  Add(u64, &'a [i64], &'a [i64]),
+  Reloc(&'a [(u64, u64)]),
+  Del(u64),
+}
+
+impl ElabStep {
+  pub fn as_ref(&self) -> ElabStepRef {
+    match *self {
+      ElabStep::Orig(i, ref v) => ElabStepRef::Orig(i, v),
+      ElabStep::Add(i, ref v, ref p) => ElabStepRef::Add(i, v, p),
+      ElabStep::Reloc(ref v) => ElabStepRef::Reloc(v),
+      ElabStep::Del(i) => ElabStepRef::Del(i),
+    }
+  }
+}
 #[derive(Debug, Copy, Clone)]
 pub enum ProofRef<'a> {
   LRAT(&'a [i64]),

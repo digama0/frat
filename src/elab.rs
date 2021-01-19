@@ -9,7 +9,7 @@ use slab::Slab;
 use super::midvec::MidVec;
 use super::dimacs::{parse_dimacs, parse_dimacs_map};
 use super::serialize::Serialize;
-use super::parser::{detect_binary, Step, StepRef, ElabStep, Segment,
+use super::parser::{detect_binary, Step, StepRef, ElabStep, ElabStepRef, Segment,
   Proof, ProofRef, Mode, Ascii, Bin, LRATParser, LRATStep};
 use super::backparser::{VecBackParser, BackParser, StepIter, ElabStepIter};
 use super::perm_clause::*;
@@ -17,7 +17,7 @@ use super::perm_clause::*;
 // Set this to true to get an error log when unit propagation fails (assumes no RAT steps)
 const LOG_UNIT_PROP_ERROR: bool = false;
 
-#[derive(Copy, Clone, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
 struct Reason(usize);
 
 impl Reason {
@@ -175,6 +175,13 @@ impl Watches {
 }
 
 #[derive(Default)]
+struct Hint {
+  steps: Vec<i64>,
+  temp: Vec<i64>,
+  // rat_set: HashMap<i64, usize>,
+}
+
+#[derive(Default)]
 struct Context {
   max_var: i64,
   clauses: Slab<Clause>,
@@ -278,13 +285,12 @@ impl Context {
       || panic!("at {:?}: Clause {} to be accessed does not exist", self.step, i))
   }
 
-  fn finalize_hint(&mut self, conflict: i64) -> Vec<i64> {
+  fn finalize_hint(&mut self, conflict: i64, hint: &mut Hint) {
     struct Finalize<'a> {
       va: &'a mut VAssign,
       #[cfg(debug)] step: u64,
       clauses: &'a Slab<Clause>,
-      ret: Vec<i64>,
-      marks: Vec<i64>,
+      hint: &'a mut Hint,
     }
 
     impl<'a> Finalize<'a> {
@@ -297,10 +303,10 @@ impl Context {
           for &l in &self.clauses[c].lits[1..] {
             if !matches!(self.va.tru_lits[-l], Assign::Mark) { self.mark(-l) }
           }
-          self.ret.push(step);
+          self.hint.steps.push(step);
         }
         self.va.tru_lits[lit] = Assign::Mark;
-        self.marks.push(lit);
+        self.hint.temp.push(lit);
       }
     }
 
@@ -308,20 +314,20 @@ impl Context {
       va: &mut self.va,
       #[cfg(debug)] step: self.step,
       clauses: &self.clauses,
-      ret: Vec::with_capacity(20),
-      marks: Vec::with_capacity(20),
+      hint,
     };
 
     fin.mark(conflict);
     fin.mark(-conflict);
+    let Finalize {va, hint, ..} = fin;
 
-    for lit in fin.marks { fin.va.tru_lits[lit] = Assign::Yes }
-
-    #[cfg(debug)] {
-      assert!(!fin.ret.is_empty(), "at {}: empty hint or tautologous clause", self.step);
+    for lit in hint.temp.drain(..) {
+      va.tru_lits[lit] = Assign::Yes
     }
-    fin.va.clear_hyps();
-    fin.ret
+
+    debug_assert!(!hint.steps.is_empty(),
+      "at {}: empty hint or tautologous clause", self.step);
+    va.clear_hyps();
   }
 
   #[allow(unused)]
@@ -456,8 +462,6 @@ impl Context {
     //   let _ = self.log_status("unit_prop_before.log", c);
     // }
 
-    debug_assert!(self.va.first_hyp == self.va.tru_stack.len(), "uncleared hypotheses");
-
     if let Some(k) = self.va.unsat() { return Some(k) }
 
     if !self.va.units_processed || self.va.first_unprocessed < self.va.tru_stack.len() {
@@ -537,8 +541,6 @@ impl Context {
     //   let _ = self.log_status("unit_prop_before.log", ls);
     // }
 
-    debug_assert!(self.va.first_hyp == self.va.tru_stack.len(), "uncleared hypotheses");
-
     if let Some(k) = self.va.unsat() { return Some(k) }
 
     if !self.va.units_processed {
@@ -590,24 +592,25 @@ impl Context {
     }
   }
 
-  fn build_step(&mut self, ls: &[i64], hint: Option<&[i64]>, strict: bool) -> Option<Vec<i64>> {
+  fn build_step(&mut self, ls: &[i64], hint: Option<&[i64]>, strict: bool, out: &mut Hint) -> bool {
     if let Some(is) = hint {
       if let Some(k) = self.propagate_hint(ls, is, strict) {
-        return Some(self.finalize_hint(k))
+        self.finalize_hint(k, out);
+        return true
       }
     }
     if let Some(k) = self.propagate(ls) {
-      return Some(self.finalize_hint(k))
+      self.finalize_hint(k, out);
+      return true
     }
-    None
+    false
   }
 
   fn run_rat_step<'a>(&mut self, ls: &[i64], init: Option<&[i64]>,
-      mut rats: Option<(&'a i64, &'a [i64])>, strict: bool) -> Vec<i64> {
+      mut rats: Option<(&'a i64, &'a [i64])>, strict: bool, out: &mut Hint) {
+    out.steps.clear();
     if rats.is_none() {
-      if let Some(res) = self.build_step(ls, init, strict) {
-        return res
-      }
+      if self.build_step(ls, init, strict, out) { return }
     }
     let _ = self.propagate_hint(&ls, init.unwrap_or(&[]), strict);
     let pivot = ls[0];
@@ -630,7 +633,6 @@ impl Context {
         }
       }
     }
-    let mut steps = vec![];
     let mut todo = vec![];
     for w in &self.watch.0 {
       for &c in &w[-pivot] {
@@ -647,22 +649,26 @@ impl Context {
         }
       }
     }
-    let mut proofs: HashMap<_, _> = todo.into_iter().map(|(c, resolvent, hint)|
-      (c, self.build_step(&resolvent, hint, strict).unwrap_or_else(||
-        panic!("Unit propagation stuck, cannot resolve clause {:?}", resolvent)))).collect();
+
+    let mut proofs: HashMap<_, _> = todo.into_iter().map(|(c, resolvent, hint)| {
+      let old = mem::take(&mut out.steps);
+      assert!(self.build_step(&resolvent, hint, strict, out),
+        "Unit propagation stuck, cannot resolve clause {:?}", resolvent);
+      (c, mem::replace(&mut out.steps, old))
+    }).collect();
 
     for c in order {
       let mut chain = proofs.remove(&c).unwrap();
-      steps.push(-(self.clauses[c].name as i64));
-      steps.append(&mut chain);
+      out.steps.push(-(self.clauses[c].name as i64));
+      out.steps.append(&mut chain);
     }
-    steps
   }
 }
 
 fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Result<()> {
   let mut origs = Vec::new();
   let ctx = &mut Context::default();
+  let hint = &mut Hint::default();
   for s in StepIter(BackParser::new(mode, frat)?) {
     // eprintln!("<- {:?}", s);
     match s {
@@ -682,17 +688,17 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
         let c = ctx.remove(i);
         c.check_subsumed(&ls, ctx.step);
         if full || c.marked {
-          let steps: Vec<i64> = if let Some(Proof::LRAT(is)) = p {
+          if let Some(Proof::LRAT(is)) = p {
             if let Some(start) = is.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
               let (init, rest) = is.split_at(start);
-              ctx.run_rat_step(&c, Some(init), rest.split_first(), false)
+              ctx.run_rat_step(&c, Some(init), rest.split_first(), false, hint)
             } else {
-              ctx.run_rat_step(&c, Some(&is), None, false)
+              ctx.run_rat_step(&c, Some(&is), None, false, hint)
             }
           } else {
-            ctx.run_rat_step(&c, None, None, false)
+            ctx.run_rat_step(&c, None, None, false, hint)
           };
-          for &i in &steps {
+          for &i in &hint.steps {
             let i = i.abs() as u64;
             let c = ctx.get(i);
             let cl = &mut ctx.clauses[c];
@@ -710,7 +716,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
               }
             }
           }
-          ElabStep::Add(i, c.lits.into(), steps).write(w).expect("Failed to write add step");
+          ElabStepRef::Add(i, &c.lits, &hint.steps).write(w).expect("Failed to write add step");
         }
         // else { eprintln!("delete {}", i); }
       }
@@ -949,6 +955,7 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
   let lp = LRATParser::from(mode, lrat);
   let mut k = 0;
   let ctx = &mut Context::default();
+  let hint = &mut Hint::default();
 
   for c in cnf {
     k += 1;
@@ -968,9 +975,9 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
         // eprintln!("{}: {:?} {:?}", k, ls, p);
         if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
           let (init, rest) = p.split_at(start);
-          ctx.run_rat_step(&ls, Some(init), rest.split_first(), true);
+          ctx.run_rat_step(&ls, Some(init), rest.split_first(), true, hint);
         } else {
-          ctx.run_rat_step(&ls, Some(&p), None, true);
+          ctx.run_rat_step(&ls, Some(&p), None, true, hint);
         }
         if ls.is_empty() { return Ok(()) }
         ctx.insert(i, true, ls.into());
