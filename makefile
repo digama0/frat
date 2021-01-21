@@ -1,8 +1,5 @@
-.DEFAULT_GOAL := frat
-
-frat: ./src/elab.rs
+main: FORCE
 	cargo build --release 
-	mv ./target/release/frat-rs .
 
-clean:
-	rm frat-rs
+FORCE: ;
+
