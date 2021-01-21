@@ -45,12 +45,17 @@ struct VAssign {
 }
 
 impl VAssign {
-  fn clear_hyps(&mut self) {
-    for i in self.tru_stack.drain(self.first_hyp..) {
+  fn clear_to(&mut self, n: usize) {
+    for i in self.tru_stack.drain(n..) {
       self.tru_lits[i] = Assign::No;
       self.reasons[i] = Reason::NONE;
     }
-    self.first_unprocessed = self.first_unprocessed.min(self.first_hyp);
+    self.first_unprocessed = self.first_unprocessed.min(n);
+  }
+
+  fn clear_hyps(&mut self) {
+    let n = self.first_hyp;
+    self.clear_to(n)
   }
 
   fn reserve_to(&mut self, max: i64) {
@@ -171,6 +176,13 @@ impl Watches {
 struct Hint {
   steps: Vec<i64>,
   temp: Vec<i64>,
+}
+
+#[derive(Default)]
+struct RatHint {
+  hint: Hint,
+  steps_temp: Vec<i64>,
+  rat_set: HashMap<i64, usize>,
 }
 
 #[derive(Default)]
@@ -306,13 +318,15 @@ impl Context {
 
     fin.mark(conflict);
     fin.mark(-conflict);
-    let Finalize {va, hint, ..} = fin;
 
+    debug_assert!(!fin.hint.steps.is_empty(),
+      "at {}: empty hint or tautologous clause", self.step);
+  }
+
+  fn clear_marks(&mut self, hint: &mut Hint) {
     for lit in hint.temp.drain(..) {
-      va.tru_lits[lit] = Assign::Yes
+      self.va.tru_lits[lit] = Assign::Yes
     }
-
-    va.clear_hyps();
   }
 
   fn propagate_core(&mut self) -> Option<i64> {
@@ -487,20 +501,106 @@ impl Context {
     false
   }
 
+  fn rat_resolve_one(&mut self,
+    ls: &[i64], c: usize, pivot: i64, depth: usize,
+    hint: Option<&[i64]>, strict: bool,
+    out: &mut Hint, pre_rat: &mut Vec<i64>
+  ) {
+    let step_start = out.steps.len();
+    let mark_start = out.temp.len();
+    (|| {
+      let cl = &self.clauses[c];
+      assert!(!strict || hint.is_some(), "Clause {:?} not in LRAT trace", cl.lits);
+      out.steps.push(-(cl.name as i64));
+      for x in cl {
+        if x != -pivot && !self.va.assign(-x, Reason::NONE) {
+          self.finalize_hint(x, out);
+          return
+        }
+      }
+      assert!(self.build_step(&[], hint, strict, out),
+        "Unit propagation stuck, cannot resolve clause {:?} with {:?} on pivot {}",
+        ls, self.clauses[c], pivot);
+    })();
+
+    self.va.clear_to(depth);
+
+    let mut next = out.steps[step_start..].iter_mut().peekable();
+    for lit in &mut out.temp[mark_start..] {
+      if self.va.is_true(*lit) {
+        if let Some(c) = self.va.reasons[*lit].clause() {
+          let mut name = self.clauses[c].name as i64;
+          while next.peek() != Some(&&mut name) {next.next().unwrap();}
+          pre_rat.push(mem::take(next.next().unwrap()))
+        }
+      } else { *lit = 0 }
+    }
+  }
+
   fn run_rat_step<'a>(&mut self, ls: &[i64], init: Option<&[i64]>,
-      rats: Option<(&'a i64, &'a [i64])>, strict: bool, out: &mut Hint) {
+    mut rats: Option<(&'a i64, &'a [i64])>, strict: bool,
+    RatHint {hint: out, steps_temp, rat_set}: &mut RatHint
+  ) {
     out.steps.clear();
     if rats.is_none() {
-      if self.build_step(ls, init, strict, out) { return }
+      if self.build_step(ls, init, strict, out) {
+        self.clear_marks(out);
+        self.va.clear_hyps();
+        return
+      }
     }
-    unimplemented!("RAT steps are not available in this version, see the master branch")
+
+    let (&pivot, ls1) = ls.split_first()
+      .expect("Unit propagation stuck, failed to prove empty clause");
+    let _ = self.propagate_hint(ls1, init.unwrap_or(&[]), strict);
+    let depth = self.va.tru_stack.len();
+
+    for (lit, w) in self.watch.watch(true) {
+      if lit != 0 {
+        for &c in w {
+          let cl = &self.clauses[c];
+          if cl[0] == lit && cl.contains(&-pivot) {
+            assert!(rat_set.insert(cl.name as i64, c).is_none());
+          }
+        }
+      }
+    }
+
+    mem::swap(&mut out.steps, steps_temp);
+
+    while let Some((&s, rest)) = rats {
+      let hint = if let Some(i) = rest.iter().position(|&i| i < 0) {
+        let (chain, r) = rest.split_at(i);
+        rats = r.split_first();
+        chain
+      } else {
+        rats = None;
+        rest
+      };
+      if let Some(c) = rat_set.remove(&-s) {
+        self.rat_resolve_one(ls, c, pivot, depth, Some(hint), strict, out, steps_temp);
+      }
+    }
+
+    for (_, c) in rat_set.drain() {
+      self.rat_resolve_one(ls, c, pivot, depth, None, strict, out, steps_temp);
+    }
+
+    mem::swap(&mut out.steps, steps_temp);
+    for lit in out.temp.drain(..) {
+      if lit != 0 {
+        self.va.tru_lits[lit] = Assign::Yes
+      }
+    }
+    out.steps.extend(steps_temp.drain(..).filter(|&l| l != 0));
+    self.va.clear_hyps();
   }
 }
 
 fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Result<()> {
   let mut origs = Vec::new();
   let ctx = &mut Context::default();
-  let hint = &mut Hint::default();
+  let hint = &mut RatHint::default();
   for s in StepIter(BackParser::new(mode, frat)?) {
     match s {
 
@@ -528,7 +628,8 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
           } else {
             ctx.run_rat_step(&c, None, None, false, hint)
           };
-          for &i in &hint.steps {
+          let steps = &hint.hint.steps;
+          for &i in steps {
             let i = i.abs() as u64;
             let c = ctx.get(i);
             let cl = &mut ctx.clauses[c];
@@ -545,7 +646,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Res
               }
             }
           }
-          ElabStepRef::Add(i, &c.lits, &hint.steps).write(w).expect("Failed to write add step");
+          ElabStepRef::Add(i, &c.lits, steps).write(w).expect("Failed to write add step");
         }
       }
 
@@ -778,7 +879,7 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
   let lp = LRATParser::from(mode, lrat);
   let mut k = 0;
   let ctx = &mut Context::default();
-  let hint = &mut Hint::default();
+  let hint = &mut RatHint::default();
 
   for c in cnf {
     k += 1;
