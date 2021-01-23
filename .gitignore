@@ -1,6 +1,5 @@
 target
 Cargo.lock
-*.cnf
 *.p
 a.out
 .vscode/launch.json
