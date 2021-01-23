@@ -188,7 +188,7 @@ struct Hint {
 #[derive(Default)]
 struct RatHint {
   hint: Hint,
-  steps_temp: Vec<i64>,
+  pre_rat: Vec<i64>,
   rat_set: HashMap<i64, usize>,
 }
 
@@ -655,7 +655,7 @@ impl Context {
 
   fn run_rat_step<'a>(&mut self, ls: &[i64], init: Option<&[i64]>,
     mut rats: Option<(&'a i64, &'a [i64])>, strict: bool,
-    RatHint {hint: out, steps_temp, rat_set}: &mut RatHint
+    RatHint {hint: out, pre_rat, rat_set}: &mut RatHint
   ) {
     out.steps.clear();
     if rats.is_none() {
@@ -682,7 +682,7 @@ impl Context {
       }
     }
 
-    mem::swap(&mut out.steps, steps_temp);
+    mem::swap(&mut out.steps, pre_rat);
 
     while let Some((&s, rest)) = rats {
       let hint = if let Some(i) = rest.iter().position(|&i| i < 0) {
@@ -694,21 +694,22 @@ impl Context {
         rest
       };
       if let Some(c) = rat_set.remove(&-s) {
-        self.rat_resolve_one(ls, c, pivot, depth, Some(hint), strict, out, steps_temp);
+        self.rat_resolve_one(ls, c, pivot, depth, Some(hint), strict, out, pre_rat);
       }
     }
 
     for (_, c) in rat_set.drain() {
-      self.rat_resolve_one(ls, c, pivot, depth, None, strict, out, steps_temp);
+      self.rat_resolve_one(ls, c, pivot, depth, None, strict, out, pre_rat);
     }
 
-    mem::swap(&mut out.steps, steps_temp);
+    mem::swap(&mut out.steps, pre_rat);
     for lit in out.temp.drain(..) {
       if lit != 0 {
         self.va.tru_lits[lit] = Assign::Yes
       }
     }
-    out.steps.extend(steps_temp.drain(..).filter(|&l| l != 0));
+    out.steps.extend(pre_rat.drain(..).filter(|&l| l != 0));
+    self.clear_marks(out);
     self.va.clear_hyps();
   }
 }
