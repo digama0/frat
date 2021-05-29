@@ -603,12 +603,14 @@ impl Context {
     }
   }
 
-  fn build_step(&mut self, ls: &[i64], hint: Option<&[i64]>, strict: bool, out: &mut Hint) -> bool {
+  fn build_step(&mut self, ls: &[i64], hint: Option<&[i64]>, strict: bool, out: &mut Hint,
+    fallback: impl FnOnce(&mut Self) -> Option<()>,
+  ) -> bool {
     if let Some(is) = hint {
       if let Some(k) = self.propagate_hint(ls, is, strict) {
         self.finalize_hint(k, out);
         return true
-      }
+      } else if fallback(self).is_some() { return true }
     }
     if let Some(k) = self.propagate(ls) {
       self.finalize_hint(k, out);
@@ -634,7 +636,7 @@ impl Context {
           return
         }
       }
-      assert!(self.build_step(&[], hint, strict, out),
+      assert!(self.build_step(&[], hint, strict, out, |_| None),
         "Unit propagation stuck, cannot resolve clause {:?} with {:?} on pivot {}",
         ls, self.clauses[c], pivot);
     })();
@@ -659,7 +661,24 @@ impl Context {
   ) {
     out.steps.clear();
     if rats.is_none() {
-      if self.build_step(ls, init, strict, out) {
+      if self.build_step(ls, init, strict, out, |this| {
+        // Special case: A RAT step which introduces a fresh variable is indistinguishable
+        // from a non-RAT step, because there are no negative numbers in the LRAT proof since no
+        // clauses contain the negated pivot literal. In this case a correct and optimal hint
+        // is present but empty, and RUP fails quickly in this case. So we insert some extra code
+        // here to avoid incurring the cost of propagate() in a 100% hints file.
+        if !init?.is_empty() { return None }
+        let pivot = *ls.first()?;
+        for (lit, w) in this.watch.watch(true) {
+          if lit != 0 {
+            for &c in w {
+              let cl = &this.clauses[c];
+              if cl[0] == lit && cl.contains(&-pivot) { return None }
+            }
+          }
+        }
+        Some(())
+      }) {
         self.clear_marks(out);
         self.va.clear_hyps();
         return
