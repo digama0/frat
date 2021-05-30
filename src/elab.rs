@@ -776,30 +776,24 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io:
                 ctx.watch.add(true, a, c);
                 ctx.watch.add(true, b, c);
               }
-              if !full {
-                ElabStep::Del(i).write(w).expect("Failed to write delete step");
-              }
+              if !full { ElabStep::Del(i).write(w)? }
             }
           }
-          ElabStepRef::add(i, &c.lits, steps).write(w).expect("Failed to write add step");
+          ElabStepRef::add(i, &c.lits, steps).write(w)?
         }
         // else { eprintln!("delete {}", i); }
       }
 
       Step::Reloc(mut relocs) => {
         ctx.reloc(&mut relocs);
-        if !relocs.is_empty() {
-          ElabStep::Reloc(relocs).write(w).expect("Failed to write reloc step");
-        }
+        if !relocs.is_empty() { ElabStep::Reloc(relocs).write(w)? }
       }
 
       Step::Del(i, mut ls) => {
         ctx.step = i;
         dedup_vec(&mut ls);
         ctx.insert(i, false, ls.into());
-        if full {
-          ElabStep::Del(i).write(w).expect("Failed to write delete step");
-        }
+        if full { ElabStep::Del(i).write(w)? }
       },
 
       Step::Final(i, mut ls) => {
@@ -813,9 +807,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io:
     }
   }
 
-  for (i, ls) in origs {
-    ElabStep::Orig(i, ls.into()).write(w).expect("Failed to write orig step");
-  }
+  for (i, ls) in origs { ElabStep::Orig(i, ls.into()).write(w)? }
 
   Ok(())
 }
