@@ -8,7 +8,7 @@ use slab::Slab;
 
 use super::midvec::MidVec;
 use super::dimacs::{parse_dimacs, parse_dimacs_map};
-use super::serialize::Serialize;
+use super::serialize::{Serialize, ModeWrite, ModeWriter};
 use super::parser::{detect_binary, Step, StepRef, ElabStep, ElabStepRef, Segment,
   Proof, ProofRef, Mode, Ascii, Bin, LRATParser, LRATStep};
 use super::backparser::{VecBackParser, BackParser, StepIter, ElabStepIter};
@@ -733,7 +733,7 @@ impl Context {
   }
 }
 
-fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl Write) -> io::Result<()> {
+fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io::Result<()> {
   let mut origs = Vec::new();
   let ctx = &mut Context::default();
   let hint = &mut RatHint::default();
@@ -964,15 +964,15 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   let bin = detect_binary(&mut frat)?;
   println!("elaborating...");
   if let Some(temp_sz) = in_mem {
-    let mut temp = Vec::with_capacity(temp_sz as usize);
+    let mut temp = ModeWriter(Bin, Vec::with_capacity(temp_sz as usize));
     if bin { elab(Bin, full, frat, &mut temp)? }
     else { elab(Ascii, full, frat, &mut temp)? }
 
-    return finish(args, full, dimacs, VecBackParser(temp))
+    return finish(args, full, dimacs, VecBackParser(temp.1))
   } else {
     let temp_path = format!("{}.temp", frat_path);
     {
-      let mut temp_write = BufWriter::new(File::create(&temp_path)?);
+      let mut temp_write = ModeWriter(Bin, BufWriter::new(File::create(&temp_path)?));
       if bin { elab(Bin, full, frat, &mut temp_write)? }
       else { elab(Ascii, full, frat, &mut temp_write)? };
       temp_write.flush()?;
@@ -1069,7 +1069,7 @@ pub fn lratchk(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   check_lrat(Ascii, cnf, BufReader::new(lrat).bytes().map(Result::unwrap))
 }
 
-fn refrat_pass(elab: File, w: &mut impl Write) -> io::Result<()> {
+fn refrat_pass(elab: File, w: &mut impl ModeWrite) -> io::Result<()> {
 
   let mut ctx: HashMap<u64, Vec<i64>> = HashMap::new();
   for s in ElabStepIter(BackParser::new(Bin, elab)?) {
@@ -1110,7 +1110,7 @@ fn refrat_pass(elab: File, w: &mut impl Write) -> io::Result<()> {
 pub fn refrat(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   let elab_path = args.next().expect("missing elab file");
   let frat_path = args.next().expect("missing frat file");
-  let w = &mut BufWriter::new(File::create(&frat_path)?);
+  let w = &mut ModeWriter(Bin, BufWriter::new(File::create(&frat_path)?));
   refrat_pass(File::open(elab_path)?, w)?;
   w.flush()
 }

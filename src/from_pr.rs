@@ -7,7 +7,7 @@ use crate::dimacs::parse_dimacs;
 use crate::midvec::MidVec;
 use crate::parser::{Mode, StepRef, ProofRef, Ascii, Bin, DRATParser, DRATStep, detect_binary};
 use crate::perm_clause::PermClause;
-use crate::serialize::Serialize;
+use crate::serialize::{Serialize, ModeWrite, ModeWriter};
 
 #[repr(u8)] #[derive(Copy, Clone, PartialEq, Eq)]
 enum Assign {
@@ -26,12 +26,13 @@ struct PrStep {
   marked: MidVec<i64>,
 }
 
+type M = Bin;
 
 fn add_pr_step(
   PrStep {assignment, phase4_pfs, marked}: &mut PrStep,
   k: &mut u64,
   ctx: &HashMap<PermClause, Vec<u64>>,
-  w: &mut impl Write,
+  w: &mut impl ModeWrite<M>,
   opt: bool,
   (lemma, witness): (&[i64], &[i64]),
   def: i64,
@@ -64,12 +65,12 @@ fn add_pr_step(
   // disabled because the original implementation does not make any sense
   let mflag = false; // lemma.iter().all(|&lit| assignment[lit] != Assign::Assigned) && lemma.len() != 1;
 
-  fn add(k: &mut u64, c: Vec<i64>, pf: Option<&[i64]>, w: &mut impl Write) -> io::Result<(u64, Vec<i64>)> {
+  fn add(k: &mut u64, c: Vec<i64>, pf: Option<&[i64]>, w: &mut impl ModeWrite<M>) -> io::Result<(u64, Vec<i64>)> {
     *k += 1;
     StepRef::Add(*k, &c, pf.map(ProofRef::LRAT)).write(w)?;
     Ok((*k, c))
   }
-  fn delete((k, c): (u64, Vec<i64>), w: &mut impl Write) -> io::Result<()> {
+  fn delete((k, c): (u64, Vec<i64>), w: &mut impl ModeWrite<M>) -> io::Result<()> {
     StepRef::Del(k, &c).write(w)
   }
 
@@ -199,7 +200,7 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
 ) -> io::Result<()> {
   let mut pr = DRATParser::from(mode, BufReader::new(pr).bytes().map(Result::unwrap));
   let mut maxvar = vars.try_into().unwrap();
-  let w = &mut BufWriter::new(frat);
+  let w = &mut ModeWriter(M::default(), BufWriter::new(frat));
   let mut k = 0;
   let mut ctx: HashMap<PermClause, Vec<u64>> = HashMap::new();
   for ls in cnf {
