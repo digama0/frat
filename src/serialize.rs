@@ -74,7 +74,6 @@ impl Serialize<Ascii> for i64 {
 
 impl<'a> Serialize<Bin> for StepRef<'a> {
   fn write(&self, w: &mut impl ModeWrite<Bin>) -> io::Result<()> {
-    println!("{:?}", self);
     match *self {
       StepRef::Orig(idx, vec) => (b'o', (idx, vec)).write(w),
       StepRef::Add(idx, vec, None) => (b'a', (idx, vec)).write(w),
@@ -90,7 +89,6 @@ impl<'a> Serialize<Bin> for StepRef<'a> {
 
 impl<'a> Serialize<Ascii> for StepRef<'a> {
   fn write(&self, w: &mut impl ModeWrite<Ascii>) -> io::Result<()> {
-    println!("{:?}", self);
     match *self {
       StepRef::Orig(idx, vec) => {
         write!(w, "o {}  ", idx)?; vec.write(w)?; writeln!(w)
@@ -143,7 +141,6 @@ impl<'a> Serialize<Bin> for ElabStepRef<'a> {
 
 impl<'a> Serialize<Ascii> for ElabStepRef<'a> {
   fn write(&self, w: &mut impl ModeWrite<Ascii>) -> io::Result<()> {
-    println!("{:?}", self);
     match *self {
       ElabStepRef::Orig(idx, vec) => StepRef::Orig(idx, vec).write(w),
       ElabStepRef::Add(idx, vec, steps) =>
