@@ -595,10 +595,7 @@ impl Context {
         if unsat { return Some(k) }
         progress = true;
       }
-      if !progress {
-        self.va.clear_hyps();
-        return None
-      }
+      if !progress { return None }
       mem::swap(&mut is, &mut queue);
     }
   }
@@ -630,6 +627,10 @@ impl Context {
       let cl = &self.clauses[c];
       assert!(!strict || hint.is_some(), "Clause {:?} not in LRAT trace", cl.lits);
       out.steps.push(-(cl.name as i64));
+      if let Some(k) = self.va.unsat() {
+        self.finalize_hint(k, out);
+        return
+      }
       for x in cl {
         if x != -pivot && !self.va.assign(-x, Reason::NONE) {
           self.finalize_hint(x, out);
@@ -669,13 +670,8 @@ impl Context {
         // here to avoid incurring the cost of propagate() in a 100% hints file.
         if !init?.is_empty() { return None }
         let pivot = *ls.first()?;
-        for (lit, w) in this.watch.watch(true) {
-          if lit != 0 {
-            for &c in w {
-              let cl = &this.clauses[c];
-              if cl[0] == lit && cl.contains(&-pivot) { return None }
-            }
-          }
+        for (_, cl) in &this.clauses {
+          if cl.contains(&-pivot) { return None }
         }
         Some(())
       }) {
@@ -690,14 +686,9 @@ impl Context {
     let _ = self.propagate_hint(ls1, init.unwrap_or(&[]), strict);
     let depth = self.va.tru_stack.len();
 
-    for (lit, w) in self.watch.watch(true) {
-      if lit != 0 {
-        for &c in w {
-          let cl = &self.clauses[c];
-          if cl[0] == lit && cl.contains(&-pivot) {
-            assert!(rat_set.insert(cl.name as i64, c).is_none());
-          }
-        }
+    for (c, cl) in &self.clauses {
+      if cl.contains(&-pivot) {
+        assert!(rat_set.insert(cl.name as i64, c).is_none());
       }
     }
 
