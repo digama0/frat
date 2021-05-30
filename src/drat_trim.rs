@@ -1,4 +1,4 @@
-use std::{convert::TryInto, fmt::Display, io::StdinLock};
+use std::{fmt::{Display, Debug}, io::StdinLock};
 use std::io::{self, Read, Write, Seek, SeekFrom, BufReader};
 use std::ops::{Deref, DerefMut};
 use std::fs::File;
@@ -66,6 +66,12 @@ impl ClauseId {
   fn new(id: usize, active: bool) -> Self { Self(id << 1 | active as usize) }
   #[inline] fn id(self) -> usize { self.0 >> 1 }
   #[inline] fn active(self) -> bool { self.0 & ACTIVE != 0 }
+}
+
+impl Debug for ClauseId {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    if self.active() { write!(f, "*{}", self.id()) } else { write!(f, "{}", self.id()) }
+  }
 }
 
 #[derive(Copy, Clone)]
@@ -177,15 +183,20 @@ impl Reason {
   #[inline] fn get(self) -> Option<usize> { self.0.checked_sub(1) }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 struct Dependency(i64);
 
 impl Dependency {
-  #[inline] fn pos(n: ClauseId) -> Dependency { Self(n.0.try_into().unwrap()) }
-  #[inline] fn neg(n: usize) -> Dependency { let m: i64 = n.try_into().unwrap(); Self(-m) }
+  fn new(id: i64, forced: bool) -> Self { Self(id << 1 | forced as i64) }
+  #[inline] fn id(self) -> i64 { self.0 >> 1 }
+  #[inline] fn forced(self) -> bool { self.0 & 1 != 0 }
   #[inline] fn is_pos(self) -> bool { self.0 >= 0 }
-  #[inline] fn pos_clause(self) -> ClauseId { ClauseId(self.0 as usize) }
+}
 
+impl Debug for Dependency {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    if self.forced() { write!(f, "*{}", self.id()) } else { write!(f, "{}", self.id()) }
+  }
 }
 
 struct SolverOpts {
@@ -279,7 +290,7 @@ struct Solver {
   lrat_table: Box<[Option<LRATLine>]>,
   num_lemmas: usize,
   rat_set: Vec<usize>,
-  pre_rat: Vec<i64>,
+  pre_rat: Vec<Dependency>,
   deps: Vec<Dependency>,
   max_var: i64,
   prep: bool,
@@ -406,7 +417,7 @@ impl Solver {
   fn mark_clause(&mut self, clause: usize, skip_index: usize, forced: bool) {
     self.num_resolve += 1;
     let id = self.db[clause].ida;
-    self.add_dependency(Dependency::pos(ClauseId::new(id.id(), forced)));
+    self.add_dependency(Dependency::new(id.id() as i64, forced));
     if !id.active() {
       self.num_active += 1;
       self.db[clause].activate();
@@ -427,10 +438,9 @@ impl Solver {
     let mut assigned = self.false_stack.len();
     self.mark_clause(clause, skip_index, assigned > self.forced);
     while let Some(lit) = pop_ext(&self.false_stack, &mut assigned) {
-      let force = assigned < self.forced;
       match self.false_a[lit] {
         Assign::Mark => if let Some(cl) = self.reason(lit).get() {
-          self.mark_clause(cl, 1, force);
+          self.mark_clause(cl, 1, assigned > self.forced);
         },
         Assign::Assumed if !self.rat_mode && self.reduce => {
           self.num_removed += 1;
@@ -440,6 +450,7 @@ impl Solver {
         }
         _ => {}
       }
+      let force = assigned < self.forced;
       if !force { *self.reason(lit) = Reason::NONE }
       self.false_a[lit] = force.into();
     }
@@ -725,19 +736,19 @@ impl Solver {
       };
 
       let chain = if self.deps.iter().all(|&step| step.is_pos()) {
-        self.deps.iter().rev().map(|&step| step.pos_clause().id() as i64).collect::<Box<[_]>>()
+        self.deps.iter().rev().map(|&step| step.id()).collect::<Box<[_]>>()
       } else {
         let mut chain = Vec::with_capacity(self.deps.len());
 
         // first print the preRAT units in order of becoming unit
         self.pre_rat.clear();
         let mut last = 0;
-        while let Some(next) = self.deps[last..].iter().position(|&step| step.is_pos()) {
-          for cls in self.deps[last..next].iter().rev().copied().map(Dependency::pos_clause) {
-            if cls.active() {continue}
-            if !self.pre_rat.contains(&(cls.0 as i64)) {
-              self.pre_rat.push(cls.0 as i64);
-              chain.push(cls.id() as i64);
+        while let Some(len) = self.deps[last..].iter().position(|&step| step.id() < 0) {
+          let next = last + len;
+          for cls in self.deps[last..next].iter().rev().copied() {
+            if !cls.forced() && !self.pre_rat.contains(&cls) {
+              self.pre_rat.push(cls);
+              chain.push(cls.id());
             }
           }
           last = next + 1;
@@ -746,11 +757,11 @@ impl Solver {
         // print dependencies in order of becoming unit
         for &cls in self.deps.iter().rev() {
           if mode {
-            if cls.pos_clause().active() {chain.push(cls.0 >> 1)}
+            if cls.forced() {chain.push(cls.id())}
           } else if cls.is_pos() {
-            if !self.pre_rat.contains(&cls.0) {
-              self.pre_rat.push(cls.0);
-              chain.push(cls.0 >> 1);
+            if !self.pre_rat.contains(&cls) {
+              self.pre_rat.push(cls);
+              chain.push(cls.id());
             }
           }
         }
@@ -831,7 +842,7 @@ impl Solver {
       }
       if !self.propagate() { return false }
     }
-    self.add_dependency(Dependency::neg(ida.0 | 1));
+    self.add_dependency(Dependency::new(-(ida.id() as i64), true));
     true
   }
 
@@ -839,7 +850,7 @@ impl Solver {
     let mut witness = mem::take(&mut self.witness[w]);
 
     // remove from omega all literals in alpha+?
-    witness.retain(|&lit| !self.false_a[-lit].assigned() && {
+    witness.retain(|&lit| !self.false_a[-lit].assigned() || {
       if self.verb { println!("c removing overlap {}", lit) }
       false
     });
@@ -1010,7 +1021,10 @@ impl Solver {
     }
 
     self.rat_count += 1;
-    if self.verb { println!("c lemma has RAT on {}", self.db[index].pivot) }
+    if self.verb {
+      if witness.get().is_some() { println!("c lemma has PR") }
+      else { println!("c lemma has RAT on {}", self.db[index].pivot) }
+    }
     Ok(true)
   }
 
