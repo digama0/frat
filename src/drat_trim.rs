@@ -68,10 +68,21 @@ impl ClauseId {
   #[inline] fn active(self) -> bool { self.0 & ACTIVE != 0 }
 }
 
+#[derive(Copy, Clone)]
+struct Witness(usize);
+
+impl Witness {
+  #[inline] fn new(id: Option<usize>) -> Self { Self(id.unwrap_or(usize::MAX)) }
+  #[inline] fn get(self) -> Option<usize> {
+    if self.0 == usize::MAX {None} else {Some(self.0)}
+  }
+}
+
 struct Clause {
   ida: ClauseId,
   pivot: i64,
   maxdep: usize,
+  witness: Witness,
   lits: Vec<i64>,
 }
 
@@ -278,6 +289,7 @@ struct Solver {
   num_vars: usize,
   num_clauses: usize,
   unit_stack: Vec<usize>,
+  witness: Vec<Vec<i64>>,
   reason: Box<[Reason]>,
   num_resolve: usize,
   watch_list: MidVec<Vec<Watch>>,
@@ -563,7 +575,7 @@ impl Solver {
   fn print_proof(&mut self, core_count: usize) -> io::Result<()> {
     println!("c {} of {} lemmas in core using {} resolution steps",
       self.num_active - core_count + 1, self.num_lemmas + 1, self.num_resolve);
-    println!("c {} RAT lemmas in core; {} redundant literals in core lemmas",
+    println!("c {} PR lemmas in core; {} redundant literals in core lemmas",
       self.rat_count, self.num_removed);
 
     match self.mode {
@@ -583,14 +595,16 @@ impl Solver {
 
     creating(&self.lemma_str, |mut f| {
       for &ad in &self.proof {
-        let lemmas = &self.db[ad.clause()];
-        if lemmas.len() <= 1 && ad.is_del() {continue}
+        let lemma = &self.db[ad.clause()];
+        if lemma.len() <= 1 && ad.is_del() {continue}
         if self.bin_output {
           f.write_all(if ad.is_del() {b"d"} else {b"a"})?
         } else if ad.is_del() {write!(f, "d ")?}
-        let reslit = lemmas.pivot;
-        for lit in lemmas.iter().copied().filter(|&lit| lit == reslit)
-            .chain(lemmas.iter().copied().filter(|&lit| lit != reslit)) {
+        let reslit = lemma.pivot;
+        for lit in lemma.iter().copied().filter(|&lit| lit == reslit)
+            .chain(lemma.iter().copied().filter(|&lit| lit != reslit))
+            .chain(lemma.witness.get().map(|w| &*self.witness[w])
+              .unwrap_or(&[]).iter().copied()) {
           if self.bin_output { write_lit(&mut f, lit)? }
           else { write!(f, "{} ", lit)? }
         }
@@ -700,10 +714,12 @@ impl Solver {
       let time = clause.map_or(self.count, |c| db[c].id());
       let (name, clause) = if let Some(cl) = clause {
         let cl = &db[cl];
-        let mut sorted = cl.to_vec().into_boxed_slice();
+        let mut sorted = cl.to_vec();
         let reslit = cl.pivot;
         sorted.sort_by_key(|&lit| if lit == reslit {0} else {lit.abs()});
-        (self.time.id() as i64, sorted)
+        // print the witness for PR
+        if let Some(w) = cl.witness.get() { sorted.extend_from_slice(&self.witness[w]) }
+        (self.time.id() as i64, sorted.into())
       } else {
         (self.count as i64, Box::new([]) as Box<[_]>)
       };
@@ -762,7 +778,7 @@ impl Solver {
     self.print_dependencies_file(clause, true)
   }
 
-  fn check_rat(&mut self, pivot: i64) -> bool {
+  fn get_rat_set(&mut self, mut eligible: impl FnMut(&Clause) -> bool) -> Vec<usize> {
     let mut rat_set = mem::take(&mut self.rat_set);
     rat_set.clear();
     // Loop over all literals to calculate resolution candidates
@@ -770,60 +786,129 @@ impl Solver {
       // Loop over all watched clauses for literal
       for &w in &self.watch_list[i] {
         let watched = &self.db[w.clause()];
-        if watched[0] == i && // If watched literal is in first position
-          watched.contains(&-pivot) {
-          if matches!(self.mode, Mode::BackwardUnsat) && !watched.active() {
-            // println!("c RAT check ignores unmarked clause: {}", watched);
-            continue
-          }
+        if watched[0] == i && eligible(watched) { // If watched literal is in first position
           rat_set.push(w.clause());
         }
       }
     }
-
-    // self.prep = true;
-    // Check all clauses in rat_set for RUP
     rat_set.sort_by_key(|&i| self.db[i].ida.0);
-    self.deps.clear();
-    for &cl in rat_set.iter().rev() {
-      let mut rat_cls = &self.db[cl];
-      let ida = rat_cls.ida;
-      let mut blocked = 0;
-      let mut reason = Reason::NONE;
-      if self.verb { println!("c RAT clause: {}", rat_cls) }
+    rat_set
+  }
 
-      for &lit in &**rat_cls {
-        if lit != -pivot && self.false_a[-lit].assigned() {
-          let reason2 = reason!(self, lit);
-          let f = |bl: Reason| bl.get().map(|a| self.db[a].ida.0);
-          if blocked == 0 || f(reason) > f(reason2) {
-            blocked = lit; reason = reason2;
-          }
+  fn check_one_rat(&mut self,
+    cl: usize,
+    clear_blocked: bool,
+    mut witness: impl FnMut(i64) -> bool
+  ) -> bool {
+    let mut clause = &self.db[cl];
+    let ida = clause.ida;
+
+    let mut blocked = 0;
+    let mut reason = Reason::NONE;
+    for &lit in &**clause {
+      if self.false_a[-lit].assigned() && !witness(-lit) {
+        let reason2 = reason!(self, lit);
+        let f = |bl: Reason| bl.get().map(|a| self.db[a].ida.0);
+        if blocked == 0 || f(reason) > f(reason2) {
+          blocked = lit; reason = reason2;
         }
       }
+    }
 
-      if blocked != 0 {
-        if let Some(reason) = reason.get() {
-          self.analyze(reason, 1);
-          *self.reason(blocked) = Reason::NONE;
+    if blocked != 0 {
+      if let Some(reason) = reason.get() {
+        self.analyze(reason, 1);
+        if clear_blocked { *self.reason(blocked) = Reason::NONE }
+      }
+    } else {
+      for i in 0..clause.len() {
+        let lit = clause[i];
+        if !self.false_a[lit].assigned() && !witness(-lit) {
+          self.assign(-lit);
+          *self.reason(lit) = Reason::NONE;
+          clause = &self.db[cl];
         }
-      } else {
-        for i in 0..rat_cls.len() {
-          let lit = rat_cls[i];
-          if lit != -pivot && !self.false_a[-lit].assigned() {
-            self.assign(-lit);
-            *self.reason(lit) = Reason::NONE;
-            rat_cls = &self.db[cl];
-          }
+      }
+      if !self.propagate() { return false }
+    }
+    self.add_dependency(Dependency::neg(ida.0 | 1));
+    true
+  }
+
+  fn check_pr(&mut self, w: usize) -> bool {
+    let mut witness = mem::take(&mut self.witness[w]);
+
+    // remove from omega all literals in alpha+?
+    witness.retain(|&lit| !self.false_a[-lit].assigned() && {
+      if self.verb { println!("c removing overlap {}", lit) }
+      false
+    });
+
+    // Calculate the clauses which are reduced but not satisfied by omega
+    let rat_set = self.get_rat_set(|watched| {
+      let mut reduced = false;
+      for &lit in &**watched {
+        for &j in &witness {
+          if j == lit { return false }
+          if j == -lit { reduced = true }
         }
-        if !self.propagate() {
+      }
+      reduced
+    });
+
+    // Check all clauses in rat_set for RUP
+    let mut last_active = None;
+    loop {
+      let p_active = rat_set.iter().map(|&cl| &self.db[cl])
+        .filter(|&pr_cls| pr_cls.active()).count();
+      if mem::replace(&mut last_active, Some(p_active))
+          .map_or(false, |last| last >= p_active) {
+        self.rat_set = rat_set;
+        self.witness[w] = witness;
+        return true
+      }
+
+      self.deps.clear();
+      for &cl in rat_set.iter().rev() {
+        let pr_cls = &self.db[cl];
+        if matches!(self.mode, Mode::BackwardUnsat) && !pr_cls.active() {
+          if self.verb { println!("c PR check ignores unmarked clause: {}", pr_cls) }
+          continue
+        }
+        if self.verb { println!("c PR clause: {}", pr_cls) }
+        if !self.check_one_rat(cl, false, |lit| witness.contains(&lit)) {
           self.rat_set = rat_set;
+          self.witness[w] = witness;
           self.pop_all_forced();
-          if self.verb { println!("c RAT check on pivot {} failed", pivot) }
+          if self.verb { println!("c PR check on witness failed") }
           return false
         }
       }
-      self.add_dependency(Dependency::neg(ida.0 | 1))
+    }
+  }
+
+  fn check_rat(&mut self, pivot: i64) -> bool {
+    // Loop over all literals to calculate resolution candidates
+    let (mode, verb) = (self.mode, self.verb);
+    let rat_set = self.get_rat_set(|watched| watched.contains(&-pivot) && {
+      if matches!(mode, Mode::BackwardUnsat) && !watched.active() {
+        if verb { println!("c RAT check ignores unmarked clause: {}", watched) }
+        return false
+      }
+      true
+    });
+
+    // self.prep = true;
+    // Check all clauses in rat_set for RUP
+    self.deps.clear();
+    for &cl in rat_set.iter().rev() {
+      if verb { println!("c RAT clause: {}", self.db[cl]) }
+      if !self.check_one_rat(cl, true, |lit| lit == pivot) {
+        self.rat_set = rat_set;
+        self.pop_all_forced();
+        if verb { println!("c RAT check on pivot {} failed", pivot) }
+        return false
+      }
     }
 
     true
@@ -831,7 +916,17 @@ impl Solver {
 
   fn redundancy_check(&mut self, index: usize, sat: bool, size: usize) -> io::Result<bool> {
     let mut clause = &self.db[index];
+    if let Some(w) = clause.witness.get() {
+      for &lit in &*self.witness[w] {
+        if self.false_a[lit].assigned() {
+          println!("c ERROR: witness literal {} complement of units in lemma {}", lit, clause);
+          return Ok(false)
+        }
+      }
+    }
+
     let reslit = clause.pivot;
+    let witness = clause.witness;
     if self.verb { println!("c checking lemma ({}, {}) {}", size, reslit, clause) }
 
     if !matches!(self.mode, Mode::ForwardUnsat) && !clause.active() {return Ok(true)}
@@ -883,7 +978,10 @@ impl Solver {
     self.rat_mode = true;
     self.forced = self.false_stack.len();
 
-    let mut success = self.check_rat(reslit);
+    let mut success = if let Some(w) = witness.get() {
+      if !self.check_pr(w) { return Ok(false) }
+      true
+    } else { self.check_rat(reslit) };
     clause = &self.db[index];
     if !success {
       self.warn(|| println!(
@@ -1271,6 +1369,7 @@ impl Solver {
     let mut db = Vec::with_capacity(BIGINIT);
     let mut proof = Vec::with_capacity(BIGINIT);
     let mut hash_table: Vec<Vec<usize>> = std::iter::repeat_with(Vec::new).take(BIGINIT).collect();
+    let mut witness = Vec::with_capacity(INIT);
     let mut file_switch_flag = false;
     let mut reader = TrackLen::new(proof_file);
     let mut proof_file = DRATParser::from(opts.bin_mode, (&mut reader).bytes().map(|c| c.unwrap())).zip(1..);
@@ -1301,13 +1400,19 @@ impl Solver {
         }
       };
       max_var = lits.iter().copied().fold(max_var, i64::max);
-      let size = lits.len();
-      let pivot = lits.get(0).copied().unwrap_or(0);
+
+      // split line into witness (only for PR)
+      let (pivot, wit) = if let Some((&pivot, lits1)) = lits.split_first() {
+        (pivot, lits1.iter().position(|&lit| lit == pivot)
+          .map(|i| lits.drain(i+1..).collect()))
+      } else { (0, None) };
+      let wit = Witness::new(wit.map(|w| {let n = witness.len(); witness.push(w); n}));
       lits.sort();
       if lits.len() != {lits.dedup(); lits.len()} {
         opts.warn(|| println!(
           "c WARNING: detected and deleted duplicate literals at line {}", line));
       }
+      let size = lits.len();
       if size == 0 && !file_switch_flag { unsat = true }
       if del && matches!(opts.mode, Mode::BackwardUnsat) && size <= 1 {
         opts.warn(|| println!(
@@ -1332,7 +1437,7 @@ impl Solver {
         let ida = ClauseId::new(count, matches!(opts.mode, Mode::ForwardSat) && formula.len() < num_clauses);
         count += 1;
         let idx = db.len();
-        db.push(Clause {ida, lits, pivot, maxdep: 0});
+        db.push(Clause {ida, lits, pivot, maxdep: 0, witness: wit});
         hash_table[hash].push(idx);
         active += 1;
         if formula.len() < num_clauses {
@@ -1369,6 +1474,7 @@ impl Solver {
       num_lemmas,
       formula,
       proof,
+      witness,
       false_stack: Vec::with_capacity(n + 1),
       reason: vec![Reason::NONE; n + 1].into(),
       false_a: MidVec::with_capacity(max_var),
