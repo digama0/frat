@@ -292,7 +292,7 @@ impl Deref for Solver {
 }
 
 fn creating(s: &Option<String>, f: impl FnOnce(File) -> io::Result<()>) -> io::Result<()> {
-  if let Some(ref s) = s { f(File::create(s)?) } else {Ok(())}
+  if let Some(s) = s { f(File::create(s)?) } else {Ok(())}
 }
 
 macro_rules! reason {($self:ident, $lit:expr) => { $self.reason[$lit.abs() as usize] }}
@@ -783,27 +783,30 @@ impl Solver {
 
     // self.prep = true;
     // Check all clauses in rat_set for RUP
-    rat_set.sort();
+    rat_set.sort_by_key(|&i| self.db[i].ida.0);
     self.deps.clear();
     for &cl in rat_set.iter().rev() {
       let mut rat_cls = &self.db[cl];
       let ida = rat_cls.ida;
-      let mut blocked = None;
+      let mut blocked = 0;
+      let mut reason = Reason::NONE;
       if self.verb { println!("c RAT clause: {}", rat_cls) }
 
       for &lit in &**rat_cls {
         if lit != -pivot && self.false_a[-lit].assigned() {
-          if let Some(reason2) = reason!(self, lit).get() {
-            if blocked.map_or(true, |(_, reason)| reason > reason2) {
-              blocked = Some((lit, reason2));
-            }
+          let reason2 = reason!(self, lit);
+          let f = |bl: Reason| bl.get().map(|a| self.db[a].ida.0);
+          if blocked == 0 || f(reason) > f(reason2) {
+            blocked = lit; reason = reason2;
           }
         }
       }
 
-      if let Some((blocked, reason)) = blocked {
-        self.analyze(reason, 1);
-        *self.reason(blocked) = Reason::NONE;
+      if blocked != 0 {
+        if let Some(reason) = reason.get() {
+          self.analyze(reason, 1);
+          *self.reason(blocked) = Reason::NONE;
+        }
       } else {
         for i in 0..rat_cls.len() {
           let lit = rat_cls[i];
@@ -816,11 +819,11 @@ impl Solver {
         if !self.propagate() {
           self.rat_set = rat_set;
           self.pop_all_forced();
-          if self.verb { println!("c RAT check on pivot {} failed\n", pivot) }
+          if self.verb { println!("c RAT check on pivot {} failed", pivot) }
           return false
         }
-        self.add_dependency(Dependency::neg(ida.0 | 1))
       }
+      self.add_dependency(Dependency::neg(ida.0 | 1))
     }
 
     true
@@ -839,6 +842,7 @@ impl Solver {
       return Ok(true)
     }
 
+    let false_pivot = self.false_a[reslit].assigned();
     self.rat_mode = false;
     self.deps.clear();
     for &lit in &clause[..size] {
@@ -871,9 +875,9 @@ impl Solver {
 
     // Failed RUP check.  Now test RAT.
     // println!("RUP check failed.  Starting RAT check.");
-    if self.verb { println!("c RUP check failed; starting RAT check on pivot {}.\n", reslit) }
+    if self.verb { println!("c RUP check failed; starting RAT check on pivot {}.", reslit) }
 
-    if self.false_a[reslit].assigned() {return Ok(false)}
+    if false_pivot {return Ok(false)}
 
     let forced = self.forced;
     self.rat_mode = true;
