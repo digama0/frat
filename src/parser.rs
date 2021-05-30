@@ -217,55 +217,9 @@ pub enum Proof {
   LRAT(Vec<i64>),
 }
 
-#[derive(Debug)]
-pub enum Step {
-  Orig(u64, Vec<i64>),
-  Add(u64, Vec<i64>, Option<Proof>),
-  Del(u64, Vec<i64>),
-  Reloc(Vec<(u64, u64)>),
-  Final(u64, Vec<i64>),
-  Todo(u64),
-}
-
-#[derive(Debug, Clone)]
-pub enum ElabStep {
-  Orig(u64, Vec<i64>),
-  Add(u64, Vec<i64>, Vec<i64>),
-  Reloc(Vec<(u64, u64)>),
-  Del(u64),
-}
-
-#[derive(Debug, Clone)]
-pub enum ElabStepRef<'a> {
-  Orig(u64, &'a [i64]),
-  Add(u64, &'a [i64], &'a [i64]),
-  Reloc(&'a [(u64, u64)]),
-  Del(u64),
-}
-
-impl ElabStep {
-  pub fn as_ref(&self) -> ElabStepRef {
-    match *self {
-      ElabStep::Orig(i, ref v) => ElabStepRef::Orig(i, v),
-      ElabStep::Add(i, ref v, ref p) => ElabStepRef::Add(i, v, p),
-      ElabStep::Reloc(ref v) => ElabStepRef::Reloc(v),
-      ElabStep::Del(i) => ElabStepRef::Del(i),
-    }
-  }
-}
 #[derive(Debug, Copy, Clone)]
 pub enum ProofRef<'a> {
   LRAT(&'a [i64]),
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum StepRef<'a> {
-  Orig(u64, &'a [i64]),
-  Add(u64, &'a [i64], Option<ProofRef<'a>>),
-  Del(u64, &'a [i64]),
-  Reloc(&'a [(u64, u64)]),
-  Final(u64, &'a [i64]),
-  Todo(u64),
 }
 
 impl Proof {
@@ -276,15 +230,135 @@ impl Proof {
   }
 }
 
+#[derive(Debug, Clone)]
+pub struct AddStep(pub Vec<i64>);
+
+#[derive(Debug, Copy, Clone)]
+pub enum AddStepRef<'a> {
+  One(&'a [i64]),
+  #[allow(unused)] Two(&'a [i64], &'a [i64]),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum AddKind<'a> {
+  DRAT(&'a [i64]),
+  PR(&'a [i64], &'a [i64]),
+}
+impl<'a> AddKind<'a> {
+  pub fn lemma(&self) -> &'a [i64] {
+    match *self {
+      AddKind::DRAT(lemma) | AddKind::PR(lemma, _) => lemma,
+    }
+  }
+
+  pub fn witness(&self) -> Option<&'a [i64]> {
+    match *self {
+      AddKind::DRAT(_) => None,
+      AddKind::PR(_, witness) => Some(witness),
+    }
+  }
+
+  #[allow(unused)] pub fn as_ref(self) -> AddStepRef<'a> {
+    match self {
+      AddKind::DRAT(lemma) => AddStepRef::One(lemma),
+      AddKind::PR(lemma, witness) => AddStepRef::Two(lemma, witness),
+    }
+  }
+}
+
+impl AddStep {
+  pub fn as_ref(&self) -> AddStepRef<'_> { AddStepRef::One(&self.0) }
+
+  pub fn parse(&self) -> AddKind<'_> {
+    if let Some(i) = self.0.split_first()
+        .and_then(|(&pivot, rest)| rest.iter().position(|&x| pivot == x)) {
+      let (lemma, witness) = self.0.split_at(i+1);
+      AddKind::PR(lemma, witness)
+    } else {
+      AddKind::DRAT(&self.0)
+    }
+  }
+
+  pub fn parse_into<R>(mut self, f: impl FnOnce(AddKind<'_>) -> R) -> (R, Vec<i64>) {
+    let ak = self.parse();
+    (f(ak), {
+      if let AddKind::PR(lemma, _) = ak {
+        let n = lemma.len();
+        self.0.truncate(n)
+      }
+      self.0
+    })
+  }
+}
+
+#[derive(Debug)]
+pub enum Step {
+  Orig(u64, Vec<i64>),
+  Add(u64, AddStep, Option<Proof>),
+  Del(u64, Vec<i64>),
+  Reloc(Vec<(u64, u64)>),
+  Final(u64, Vec<i64>),
+  Todo(u64),
+}
+
+#[derive(Debug, Copy, Clone)]
+pub enum StepRef<'a> {
+  Orig(u64, &'a [i64]),
+  Add(u64, AddStepRef<'a>, Option<ProofRef<'a>>),
+  Del(u64, &'a [i64]),
+  Reloc(&'a [(u64, u64)]),
+  Final(u64, &'a [i64]),
+  Todo(u64),
+}
+
 impl Step {
-  pub fn as_ref(&self) -> StepRef {
+  pub fn as_ref(&self) -> StepRef<'_> {
     match *self {
       Step::Orig(i, ref v) => StepRef::Orig(i, v),
-      Step::Add(i, ref v, ref p) => StepRef::Add(i, v, p.as_ref().map(Proof::as_ref)),
+      Step::Add(i, ref v, ref p) => StepRef::Add(i, v.as_ref(), p.as_ref().map(Proof::as_ref)),
       Step::Del(i, ref v) => StepRef::Del(i, v),
       Step::Reloc(ref v) => StepRef::Reloc(v),
       Step::Final(i, ref v) => StepRef::Final(i, v),
       Step::Todo(i) => StepRef::Todo(i)
     }
+  }
+}
+
+impl<'a> StepRef<'a> {
+  #[inline] pub fn add(idx: u64, step: &'a [i64], proof: Option<&'a [i64]>) -> Self {
+    Self::Add(idx, AddStepRef::One(step), proof.map(ProofRef::LRAT))
+  }
+}
+
+#[derive(Debug, Clone)]
+pub enum ElabStep {
+  Orig(u64, Vec<i64>),
+  Add(u64, AddStep, Vec<i64>),
+  Reloc(Vec<(u64, u64)>),
+  Del(u64),
+}
+
+#[derive(Debug, Clone)]
+pub enum ElabStepRef<'a> {
+  Orig(u64, &'a [i64]),
+  Add(u64, AddStepRef<'a>, &'a [i64]),
+  Reloc(&'a [(u64, u64)]),
+  Del(u64),
+}
+
+impl ElabStep {
+  pub fn as_ref(&self) -> ElabStepRef {
+    match *self {
+      ElabStep::Orig(i, ref v) => ElabStepRef::Orig(i, v),
+      ElabStep::Add(i, ref v, ref p) => ElabStepRef::Add(i, v.as_ref(), p),
+      ElabStep::Reloc(ref v) => ElabStepRef::Reloc(v),
+      ElabStep::Del(i) => ElabStepRef::Del(i),
+    }
+  }
+}
+
+impl<'a> ElabStepRef<'a> {
+  #[inline] pub fn add(idx: u64, step: &'a [i64], proof: &'a [i64]) -> Self {
+    Self::Add(idx, AddStepRef::One(step), proof)
   }
 }

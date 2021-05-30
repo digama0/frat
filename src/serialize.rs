@@ -1,6 +1,6 @@
 use arrayvec::ArrayVec;
 use std::io::{self, Write};
-use super::parser::{Ascii, Bin, Step, StepRef, ElabStep, ElabStepRef, ProofRef};
+use super::parser::{Ascii, Bin, Step, StepRef, AddStep, AddStepRef, ElabStep, ElabStepRef, ProofRef};
 
 pub trait ModeWrite<M=Bin>: Write {}
 
@@ -70,6 +70,32 @@ impl Serialize<Bin> for i64 {
 }
 impl Serialize<Ascii> for i64 {
   fn write(&self, w: &mut impl ModeWrite<Ascii>) -> io::Result<()> { write!(w, "{}", self) }
+}
+
+impl<'a> Serialize<Bin> for AddStepRef<'a> {
+  fn write(&self, w: &mut impl ModeWrite<Bin>) -> io::Result<()> {
+    match *self {
+      AddStepRef::One(ls) => ls.iter().try_for_each(|v| v.write(w))?,
+      AddStepRef::Two(ls, ls2) => ls.iter().chain(ls2).try_for_each(|v| v.write(w))?,
+    }
+    0u8.write(w)
+  }
+}
+
+impl<'a> Serialize<Ascii> for AddStepRef<'a> {
+  fn write(&self, w: &mut impl ModeWrite<Ascii>) -> io::Result<()> {
+    match *self {
+      AddStepRef::One(ls) =>
+        ls.iter().try_for_each(|v| {v.write(w)?; write!(w, " ")})?,
+      AddStepRef::Two(ls, ls2) =>
+        ls.iter().chain(ls2).try_for_each(|v| {v.write(w)?; write!(w, " ")})?,
+    }
+    write!(w, "0")
+  }
+}
+
+impl<M> Serialize<M> for AddStep where for<'a> &'a [i64]: Serialize<M> {
+  fn write(&self, w: &mut impl ModeWrite<M>) -> io::Result<()> { (&*self.0).write(w) }
 }
 
 impl<'a> Serialize<Bin> for StepRef<'a> {

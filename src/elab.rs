@@ -9,8 +9,8 @@ use slab::Slab;
 use super::midvec::MidVec;
 use super::dimacs::{parse_dimacs, parse_dimacs_map};
 use super::serialize::{Serialize, ModeWrite, ModeWriter};
-use super::parser::{detect_binary, Step, StepRef, ElabStep, ElabStepRef, Segment,
-  Proof, ProofRef, Mode, Ascii, Bin, LRATParser, LRATStep};
+use super::parser::{detect_binary, Step, StepRef, ElabStep, ElabStepRef,
+  AddStep, Segment, Proof, Mode, Ascii, Bin, LRATParser, LRATStep};
 use super::backparser::{VecBackParser, BackParser, StepIter, ElabStepIter};
 use super::perm_clause::*;
 
@@ -742,11 +742,16 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io:
         // else { eprintln!("delete {}", i); }
       }
 
-      Step::Add(i, ls, p) => {
+      Step::Add(i, step, p) => {
         ctx.step = i;
         let c = ctx.remove(i);
-        c.check_subsumed(&ls, ctx.step);
+        let kind = step.parse();
+        let ls = kind.lemma();
+        c.check_subsumed(ls, ctx.step);
         if full || c.marked {
+          if kind.witness().is_some() {
+            println!("Warning: step {} contains PR witness, ignoring...", i)
+          }
           if let Some(Proof::LRAT(is)) = p {
             if let Some(start) = is.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
               let (init, rest) = is.split_at(start);
@@ -776,7 +781,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io:
               }
             }
           }
-          ElabStepRef::Add(i, &c.lits, steps).write(w).expect("Failed to write add step");
+          ElabStepRef::add(i, &c.lits, steps).write(w).expect("Failed to write add step");
         }
         // else { eprintln!("delete {}", i); }
       }
@@ -877,7 +882,7 @@ fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut imp
       ElabStep::Orig(_, _) =>
         panic!("Orig steps must come at the beginning of the temp file"),
 
-      ElabStep::Add(i, ls, is) => {
+      ElabStep::Add(i, AddStep(ls), is) => {
         k += 1; // Get the next fresh ID
         map.insert(i, k); // The ID of added clause is mapped to a fresh ID
         // eprintln!("{} -> {}", i, k);
@@ -1074,8 +1079,8 @@ fn refrat_pass(elab: File, w: &mut impl ModeWrite) -> io::Result<()> {
       }
 
       ElabStep::Add(i, ls, is) => {
-        StepRef::Add(i, &ls, Some(ProofRef::LRAT(&is))).write(w)?;
-        ctx.insert(i, ls);
+        StepRef::add(i, &ls.0, Some(&is)).write(w)?;
+        ctx.insert(i, ls.parse_into(|_| {}).1);
       }
 
       ElabStep::Reloc(relocs) => {

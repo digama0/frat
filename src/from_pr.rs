@@ -5,7 +5,7 @@ use std::io::{self, Read, Write, Seek, SeekFrom, BufReader, BufWriter};
 
 use crate::dimacs::parse_dimacs;
 use crate::midvec::MidVec;
-use crate::parser::{Mode, StepRef, ProofRef, Ascii, Bin, DRATParser, DRATStep, detect_binary};
+use crate::parser::{Mode, StepRef, Ascii, Bin, DRATParser, DRATStep, detect_binary};
 use crate::perm_clause::PermClause;
 use crate::serialize::{Serialize, ModeWrite, ModeWriter};
 
@@ -67,7 +67,7 @@ fn add_pr_step(
 
   fn add(k: &mut u64, c: Vec<i64>, pf: Option<&[i64]>, w: &mut impl ModeWrite<M>) -> io::Result<(u64, Vec<i64>)> {
     *k += 1;
-    StepRef::Add(*k, &c, pf.map(ProofRef::LRAT)).write(w)?;
+    StepRef::add(*k, &c, pf).write(w)?;
     Ok((*k, c))
   }
   fn delete((k, c): (u64, Vec<i64>), w: &mut impl ModeWrite<M>) -> io::Result<()> {
@@ -176,9 +176,9 @@ fn add_pr_step(
   for (c, clause, old) in phase2 {
     let (&first, rest) = old.split_first().unwrap();
     let lit = clause.iter().copied().find(|&lit| assignment[lit] != Assign::No).unwrap();
-    StepRef::Add(first, clause, Some(ProofRef::LRAT(&[c.0 as i64, marked[lit]]))).write(w)?;
+    StepRef::add(first, clause, Some(&[c.0 as i64, marked[lit]])).write(w)?;
     for &i in rest {
-      StepRef::Add(i, clause, Some(ProofRef::LRAT(&[first as _]))).write(w)?
+      StepRef::add(i, clause, Some(&[first as _])).write(w)?
     }
     delete(c, w)?
   }
@@ -186,7 +186,7 @@ fn add_pr_step(
   // phase IV (c): strengthen the weakened PR clause and add it to the formula
   *k += 1;
   let lit = lemma.iter().copied().find(|&lit| assignment[lit] != Assign::No).unwrap();
-  StepRef::Add(*k, lemma, Some(ProofRef::LRAT(&[weak_c as i64, marked[lit]]))).write(w)?;
+  StepRef::add(*k, lemma, Some(&[weak_c as i64, marked[lit]])).write(w)?;
 
   // phase IV (d): remove the implication x -> omega
   // phase IV (e): remove the clauses that contain the literal -x (which are blocked)
@@ -227,7 +227,7 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
           ls.truncate(i+1)
         } else {
           k += 1;
-          StepRef::Add(k, &ls, None).write(w)?
+          StepRef::add(k, &ls, None).write(w)?
         }
         ctx.entry(PermClause(ls)).or_default().push(k);
       }
@@ -246,7 +246,7 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
   // of the final empty clause step, so we have to insert it here.
   // Note that the empty clause step can never be RAT or PR, only RUP
   k += 1;
-  StepRef::Add(k, &[], None).write(w)?;
+  StepRef::add(k, &[], None).write(w)?;
   StepRef::Final(k, &[]).write(w)?;
 
   let mut sorted = BTreeMap::new();

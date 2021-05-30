@@ -35,7 +35,7 @@ pub fn check_proof(mode: impl Mode, proof: File) -> io::Result<()> {
           }
         }
       },
-      Step::Add(i, lits, p) => {
+      Step::Add(i, step, p) => {
         added += 1;
         if p.is_none() { missing += 1 }
         if let Some(Step::Todo(_)) = bp.peek() {} else if p.is_none() {
@@ -43,6 +43,7 @@ pub fn check_proof(mode: impl Mode, proof: File) -> io::Result<()> {
           // eprintln!("added clause {} {:?} has no proof and no todo", i, lits);
         }
         if let Some((need, lits2)) = active.remove(&i) {
+          let lits = step.parse().lemma();
           if !subsumes(&lits2, &lits) {
             eprintln!("added {:?}, removed {:?}", lits2, lits);
             bad = true;

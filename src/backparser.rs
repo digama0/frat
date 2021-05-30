@@ -119,13 +119,13 @@ impl<I: Iterator<Item=Segment>> Iterator for StepIter<I> {
     match self.0.next() {
       None => None,
       Some(Segment::Orig(idx, vec)) => Some(Step::Orig(idx, vec)),
-      Some(Segment::Add(idx, vec)) => Some(Step::Add(idx, vec, None)),
+      Some(Segment::Add(idx, vec)) => Some(Step::Add(idx, AddStep(vec), None)),
       Some(Segment::Del(idx, vec)) => Some(Step::Del(idx, vec)),
       Some(Segment::Reloc(relocs)) => Some(Step::Reloc(relocs)),
       Some(Segment::Final(idx, vec)) => Some(Step::Final(idx, vec)),
       Some(Segment::LProof(steps)) => match self.0.next() {
         Some(Segment::Add(idx, vec)) =>
-          Some(Step::Add(idx, vec, Some(Proof::LRAT(steps)))),
+          Some(Step::Add(idx, AddStep(vec), Some(Proof::LRAT(steps)))),
         _ => panic!("'l' step not preceded by 'a' step")
       },
       Some(Segment::Todo(idx)) => Some(Step::Todo(idx)),
@@ -148,7 +148,7 @@ impl<I: Iterator<Item=Segment>> Iterator for ElabStepIter<I> {
       Some(Segment::Reloc(relocs)) => Some(ElabStep::Reloc(relocs)),
       Some(Segment::LProof(steps)) => match self.0.next() {
         Some(Segment::Add(idx, vec)) =>
-          Some(ElabStep::Add(idx, vec, steps)),
+          Some(ElabStep::Add(idx, AddStep(vec), steps)),
         _ => panic!("'l' step not preceded by 'a' step")
       },
       Some(_) => self.next(),
