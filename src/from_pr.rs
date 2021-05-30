@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::TryInto;
 use std::fs::{File, read_to_string};
 use std::io::{self, Read, Write, Seek, SeekFrom, BufReader, BufWriter};
@@ -227,7 +227,9 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
           k += 1;
           StepRef::Add(k, &ls, None).write(w)?
         }
-        ctx.entry(PermClause(ls)).or_default().push(k)
+        let unsat = ls.is_empty();
+        ctx.entry(PermClause(ls)).or_default().push(k);
+        if unsat { break }
       }
       DRATStep::Del(ls) => {
         let ls = PermClause(ls);
@@ -240,10 +242,14 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
     }
   }
 
-  for (PermClause(c), vec) in ctx {
-    for st in vec {
-      StepRef::Final(st, &c).write(w)?;
+  let mut sorted = BTreeMap::new();
+  for (PermClause(c), vec) in &ctx {
+    for &st in vec {
+      assert!(sorted.insert(st, c).is_none(), "duplicate step");
     }
+  }
+  for (st, c) in sorted.into_iter().rev() {
+    StepRef::Final(st, c).write(w)?
   }
 
   w.flush()?;
