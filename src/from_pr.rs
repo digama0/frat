@@ -5,7 +5,7 @@ use std::io::{self, Read, Write, Seek, SeekFrom, BufReader, BufWriter};
 
 use crate::dimacs::parse_dimacs;
 use crate::midvec::MidVec;
-use crate::parser::{Mode, StepRef, Ascii, Bin, DRATParser, DRATStep, detect_binary};
+use crate::parser::{Mode, StepRef, Ascii, Bin, AddKind, DRATParser, DRATStep, detect_binary};
 use crate::perm_clause::PermClause;
 use crate::serialize::{Serialize, ModeWrite, ModeWriter};
 
@@ -34,7 +34,7 @@ fn add_pr_step(
   ctx: &HashMap<PermClause, Vec<u64>>,
   w: &mut impl ModeWrite<M>,
   opt: bool,
-  (lemma, witness): (&[i64], &[i64]),
+  lemma: &[i64], witness: &[i64],
   def: i64,
 ) -> io::Result<()> {
   assignment.clear();
@@ -216,20 +216,20 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
   };
   for s in pr {
     match s {
-      DRATStep::Add(mut ls) => {
-        if ls.is_empty() { break }
-        if let Some(new) = ls.iter().copied().max() {
+      DRATStep::Add(add) => {
+        if let Some(new) = add.0.iter().copied().max() {
           maxvar = maxvar.max(new)
         }
-        if let Some(i) = ls.split_first()
-            .and_then(|(&pivot, rest)| rest.iter().position(|&x| pivot == x)) {
-          add_pr_step(&mut temp, &mut k, &ctx, w, opt, ls.split_at(i+1), maxvar + 1)?;
-          ls.truncate(i+1)
-        } else {
-          k += 1;
-          StepRef::add(k, &ls, None).write(w)?
-        }
-        ctx.entry(PermClause(ls)).or_default().push(k);
+        let (unsat, lemma) = add.parse_into(|add| {
+          if add.lemma().is_empty() { return Ok(true) }
+          match add {
+            AddKind::DRAT(lemma) => { k += 1; StepRef::add(k, lemma, None).write(w) }
+            AddKind::PR(lemma, witness) =>
+              add_pr_step(&mut temp, &mut k, &ctx, w, opt, lemma, witness, maxvar + 1),
+          }.map(|_| false)
+        });
+        if unsat? { break }
+        ctx.entry(PermClause(lemma)).or_default().push(k);
       }
       DRATStep::Del(ls) => {
         let ls = PermClause(ls);

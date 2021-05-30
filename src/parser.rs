@@ -164,7 +164,7 @@ impl<M, I> LRATParser<M, I> {
 
 #[derive(Debug)]
 pub enum LRATStep {
-	Add(Vec<i64>, Vec<i64>),
+	Add(AddStep, Vec<i64>),
 	Del(Vec<i64>)
 }
 
@@ -175,7 +175,7 @@ impl<M: Mode, I: Iterator<Item=u8>> Iterator for LRATParser<M, I> {
       match self.mode.keyword(&mut self.it)? {
         b'd' => LRATStep::Del(self.mode.ivec(&mut self.it)),
         k => LRATStep::Add(
-          self.mode.ivec(&mut Some(k).into_iter().chain(&mut self.it)),
+          AddStep(self.mode.ivec(&mut Some(k).into_iter().chain(&mut self.it))),
           self.mode.ivec(&mut self.it))
       }
     ))
@@ -190,7 +190,7 @@ impl<M, I> DRATParser<M, I> {
 
 #[derive(Debug)]
 pub enum DRATStep {
-	Add(Vec<i64>),
+	Add(AddStep),
 	Del(Vec<i64>)
 }
 
@@ -200,13 +200,14 @@ impl<M: Mode, I: Iterator<Item=u8>> Iterator for DRATParser<M, I> {
     if self.mode.bin() {
       match self.mode.keyword(&mut self.it)? {
         b'd' => Some(DRATStep::Del(self.mode.ivec(&mut self.it))),
-        b'a' => Some(DRATStep::Add(self.mode.ivec(&mut self.it))),
+        b'a' => Some(DRATStep::Add(AddStep(self.mode.ivec(&mut self.it)))),
         k => panic!("bad keyword {}", k as char)
       }
     } else {
       match self.mode.keyword(&mut self.it)? {
         b'd' => Some(DRATStep::Del(self.mode.ivec(&mut self.it))),
-        k => Some(DRATStep::Add(self.mode.ivec(&mut Some(k).iter().cloned().chain(&mut self.it))))
+        k => Some(DRATStep::Add(AddStep(
+          self.mode.ivec(&mut Some(k).iter().cloned().chain(&mut self.it)))))
       }
     }
 	}

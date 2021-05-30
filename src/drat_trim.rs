@@ -1409,7 +1409,7 @@ impl Solver {
       } else {
         let (step, line) = if let Some(res) = proof_file.next() {res} else {break};
         match step {
-          DRATStep::Add(lits) => (line, false, lits),
+          DRATStep::Add(lits) => (line, false, lits.0),
           DRATStep::Del(lits) => (line, true, lits)
         }
       };

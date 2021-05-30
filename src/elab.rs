@@ -1026,18 +1026,22 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
     // eprintln!("{}: {:?}", i, s);
     match s {
 
-      LRATStep::Add(ls, p) => {
+      LRATStep::Add(add, p) => {
         assert!(i > k, "out-of-order LRAT proofs not supported");
         k = i;
-        // eprintln!("{}: {:?} {:?}", k, ls, p);
-        if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
-          let (init, rest) = p.split_at(start);
-          ctx.run_rat_step(&ls, Some(init), rest.split_first(), true, hint);
-        } else {
-          ctx.run_rat_step(&ls, Some(&p), None, true, hint);
-        }
-        if ls.is_empty() { return Ok(()) }
-        ctx.insert(i, true, ls.into());
+        let add = add.parse_into(|kind| {
+          assert!(kind.witness().is_none(), "LPR proofs not supported");
+          let ls = kind.lemma();
+          // eprintln!("{}: {:?} {:?}", k, ls, p);
+          if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
+            let (init, rest) = p.split_at(start);
+            ctx.run_rat_step(ls, Some(init), rest.split_first(), true, hint);
+          } else {
+            ctx.run_rat_step(ls, Some(&p), None, true, hint);
+          }
+        }).1;
+        if add.is_empty() { return Ok(()) }
+        ctx.insert(i, true, add.into());
       }
 
       LRATStep::Del(ls) => {

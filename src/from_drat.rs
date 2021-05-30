@@ -22,12 +22,15 @@ fn from_drat(mode: impl Mode, cnf: Vec<Box<[i64]>>, drat: File, frat: File) -> i
 
     match s {
 
-      DRATStep::Add(mut ls) => {
-        if ls.is_empty() { break }
-        ls.dedup();
-        k += 1; // Get the next fresh ID
-        StepRef::add(k, &ls, None).write(w)?;
-        ctx.entry(PermClause(ls)).or_default().push(k);
+      DRATStep::Add(add) => {
+        let (unsat, lemma) = add.parse_into(|add| {
+          let lemma = add.lemma();
+          if lemma.is_empty() { return Ok(true) }
+          k += 1; // Get the next fresh ID
+          StepRef::Add(k, add.as_ref(), None).write(w).map(|_| false)
+        });
+        if unsat? { break }
+        ctx.entry(PermClause(lemma)).or_default().push(k);
       }
 
       DRATStep::Del(ls) => {
