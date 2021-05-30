@@ -96,9 +96,9 @@ fn add_pr_step(
           move |&i| <_>::into_iter([-(i as i64), k])
         });
         for &lit in clause {
-          if assignment[lit] == Assign::No { c.push(lit) }
-          if assignment[-lit] == Assign::Assigned {
-            phase4_pfs[lit].extend(it.clone());
+          if assignment[-lit] == Assign::No { c.push(lit) }
+          else if assignment[-lit] == Assign::Assigned {
+            phase4_pfs[-lit].extend(it.clone());
           }
         }
         cleanup.push(add(k, c, Some(&[]), w)?)
@@ -116,7 +116,7 @@ fn add_pr_step(
   let weak_c = phase3.0;
   for &lit in lemma {
     if assignment[-lit] == Assign::Assigned {
-      phase4_pfs[lit].push(-(weak_c as i64));
+      phase4_pfs[-lit].push(-(weak_c as i64));
     }
   }
 
@@ -136,7 +136,7 @@ fn add_pr_step(
         for &i in is { StepRef::Del(i, clause).write(w)? }
         for &lit in clause {
           if assignment[-lit] == Assign::Assigned {
-            phase4_pfs[lit].push(-(*k as i64))
+            phase4_pfs[-lit].push(-(*k as i64));
           }
         }
       }
@@ -216,13 +216,14 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
   };
   for s in &mut pr {
     match s {
-      DRATStep::Add(ls) => {
+      DRATStep::Add(mut ls) => {
         if let Some(new) = ls.iter().copied().max() {
           maxvar = maxvar.max(new)
         }
         if let Some(i) = ls.split_first()
             .and_then(|(&pivot, rest)| rest.iter().position(|&x| pivot == x)) {
-          add_pr_step(&mut temp, &mut k, &ctx, w, opt, ls.split_at(i+1), maxvar + 1)?
+          add_pr_step(&mut temp, &mut k, &ctx, w, opt, ls.split_at(i+1), maxvar + 1)?;
+          ls.truncate(i+1)
         } else {
           k += 1;
           StepRef::Add(k, &ls, None).write(w)?
