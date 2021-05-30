@@ -23,6 +23,7 @@ fn from_drat(mode: impl Mode, cnf: Vec<Box<[i64]>>, drat: File, frat: File) -> i
     match s {
 
       DRATStep::Add(ls) => {
+        if ls.is_empty() { break }
         k += 1; // Get the next fresh ID
         StepRef::Add(k, &ls, None).write(w)?;
         ctx.entry(PermClause(ls)).or_default().push(k);
@@ -38,6 +39,12 @@ fn from_drat(mode: impl Mode, cnf: Vec<Box<[i64]>>, drat: File, frat: File) -> i
       }
     }
   }
+
+  // Some DRAT files accepted by drat-trim stop one step short
+  // of the final empty clause step, so we have to insert it here
+  k += 1;
+  StepRef::Add(k, &[], None).write(w)?;
+  StepRef::Final(k, &[]).write(w)?;
 
   for (PermClause(c), vec) in ctx {
     for st in vec {

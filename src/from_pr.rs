@@ -198,7 +198,7 @@ fn add_pr_step(
 fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
   pr: File, frat: File, opt: bool
 ) -> io::Result<()> {
-  let mut pr = DRATParser::from(mode, BufReader::new(pr).bytes().map(Result::unwrap));
+  let pr = DRATParser::from(mode, BufReader::new(pr).bytes().map(Result::unwrap));
   let mut maxvar = vars.try_into().unwrap();
   let w = &mut ModeWriter(M::default(), BufWriter::new(frat));
   let mut k = 0;
@@ -214,9 +214,10 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
     phase4_pfs: MidVec::with_capacity(maxvar),
     marked: MidVec::with_capacity(maxvar),
   };
-  for s in &mut pr {
+  for s in pr {
     match s {
       DRATStep::Add(mut ls) => {
+        if ls.is_empty() { break }
         if let Some(new) = ls.iter().copied().max() {
           maxvar = maxvar.max(new)
         }
@@ -228,9 +229,7 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
           k += 1;
           StepRef::Add(k, &ls, None).write(w)?
         }
-        let unsat = ls.is_empty();
         ctx.entry(PermClause(ls)).or_default().push(k);
-        if unsat { break }
       }
       DRATStep::Del(ls) => {
         let ls = PermClause(ls);
@@ -242,6 +241,13 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
       }
     }
   }
+
+  // Some DRAT files accepted by drat-trim stop one step short
+  // of the final empty clause step, so we have to insert it here.
+  // Note that the empty clause step can never be RAT or PR, only RUP
+  k += 1;
+  StepRef::Add(k, &[], None).write(w)?;
+  StepRef::Final(k, &[]).write(w)?;
 
   let mut sorted = BTreeMap::new();
   for (PermClause(c), vec) in &ctx {
