@@ -189,7 +189,7 @@ struct Hint {
 struct RatHint {
   hint: Hint,
   pre_rat: Vec<i64>,
-  rat_set: HashMap<i64, usize>,
+  rat_set: HashMap<usize, bool>,
 }
 
 #[derive(Default)]
@@ -200,6 +200,7 @@ struct Context {
   units: HashMap<usize, i64>,
   watch: Watches,
   va: VAssign,
+  rat_set_lit: i64,
   step: u64,
 }
 
@@ -233,13 +234,14 @@ impl Context {
     for &lit in &*lits {
       self.max_var = self.max_var.max(lit.abs())
     }
-    self.va.reserve_to(self.max_var);
-    self.watch.0[0].reserve_to(self.max_var);
-    self.watch.0[1].reserve_to(self.max_var);
     let unit = self.sort_size(&mut lits) == (false, 1);
     let i = self.clauses.insert(Clause {marked, name, lits});
     assert!(self.names.insert(name, i).is_none(),
       "at {:?}: Clause {} to be inserted already exists", self.step, name);
+    self.rat_set_lit = 0;
+    self.va.reserve_to(self.max_var);
+    self.watch.0[0].reserve_to(self.max_var);
+    self.watch.0[1].reserve_to(self.max_var);
     let lits = &*self.clauses[i];
     match *lits {
       [] => {}
@@ -286,6 +288,7 @@ impl Context {
       } else {false}
     });
     for (from, addr) in removed {
+      self.clauses[addr].name = from;
       assert!(self.names.insert(from, addr).is_none(),
         "at {:?}: Clause {} to be inserted already exists", self.step, from);
     }
@@ -670,8 +673,12 @@ impl Context {
         // here to avoid incurring the cost of propagate() in a 100% hints file.
         if !init?.is_empty() { return None }
         let pivot = *ls.first()?;
-        for (_, cl) in &this.clauses {
-          if cl.contains(&-pivot) { return None }
+        if this.rat_set_lit == pivot {
+          if !rat_set.is_empty() { return None }
+        } else {
+          for (_, cl) in &this.clauses {
+            if cl.contains(&-pivot) { return None }
+          }
         }
         Some(())
       }) {
@@ -686,15 +693,23 @@ impl Context {
     let _ = self.propagate_hint(ls1, init.unwrap_or(&[]), strict);
     let depth = self.va.tru_stack.len();
 
-    for (c, cl) in &self.clauses {
-      if cl.contains(&-pivot) {
-        assert!(rat_set.insert(cl.name as i64, c).is_none());
+    if self.rat_set_lit == pivot {
+      rat_set.values_mut().for_each(|seen| *seen = false)
+    } else {
+      rat_set.clear();
+      for (c, cl) in &self.clauses {
+        if cl.contains(&-pivot) {
+          assert!(rat_set.insert(c, false).is_none());
+        }
       }
+      self.rat_set_lit = pivot;
     }
+    let mut unseen = rat_set.len();
 
     mem::swap(&mut out.steps, pre_rat);
 
     while let Some((&s, rest)) = rats {
+      let c = self.get(-s as u64);
       let hint = if let Some(i) = rest.iter().position(|&i| i < 0) {
         let (chain, r) = rest.split_at(i);
         rats = r.split_first();
@@ -703,13 +718,17 @@ impl Context {
         rats = None;
         rest
       };
-      if let Some(c) = rat_set.remove(&-s) {
+      if let Some(seen @ &mut false) = rat_set.get_mut(&c) {
         self.rat_resolve_one(ls, c, pivot, depth, Some(hint), strict, out, pre_rat);
+        *seen = true;
+        unseen -= 1;
       }
     }
 
-    for (_, c) in rat_set.drain() {
-      self.rat_resolve_one(ls, c, pivot, depth, None, strict, out, pre_rat);
+    if unseen != 0 {
+      for (&c, _) in rat_set.iter().filter(|(_, &seen)| !seen) {
+        self.rat_resolve_one(ls, c, pivot, depth, None, strict, out, pre_rat);
+      }
     }
 
     mem::swap(&mut out.steps, pre_rat);
@@ -762,7 +781,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io:
           } else {
             ctx.run_rat_step(&c, None, None, false, hint)
           };
-          let steps = &hint.hint.steps;
+          let steps = &*hint.hint.steps;
           for &i in steps {
             let i = i.abs() as u64;
             let c = ctx.get(i);
