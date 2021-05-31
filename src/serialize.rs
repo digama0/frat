@@ -85,10 +85,12 @@ impl<'a> Serialize<Bin> for AddStepRef<'a> {
 impl<'a> Serialize<Ascii> for AddStepRef<'a> {
   fn write(&self, w: &mut impl ModeWrite<Ascii>) -> io::Result<()> {
     match *self {
-      AddStepRef::One(ls) =>
-        ls.iter().try_for_each(|v| {v.write(w)?; write!(w, " ")})?,
-      AddStepRef::Two(ls, ls2) =>
-        ls.iter().chain(ls2).try_for_each(|v| {v.write(w)?; write!(w, " ")})?,
+      AddStepRef::One(ls) => for v in ls { v.write(w)?; write!(w, " ")? },
+      AddStepRef::Two(ls, ls2) => {
+        for v in ls { v.write(w)?; write!(w, " ")? }
+        write!(w, " ")?;
+        for v in ls2 { v.write(w)?; write!(w, " ")? }
+      }
     }
     write!(w, "0")
   }

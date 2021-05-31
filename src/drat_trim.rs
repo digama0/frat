@@ -953,8 +953,7 @@ impl Solver {
     self.deps.clear();
     for &lit in &clause[..size] {
       if self.false_a[-lit].assigned() { // should only occur in forward mode
-        self.warn(|| println!(
-          "c WARNING: found a tautological clause in proof: {}", clause));
+        self.warn(|| println!("c WARNING: found a tautological clause in proof: {}", clause));
         self.pop_all_forced();
         return Ok(true)
       }
@@ -983,7 +982,7 @@ impl Solver {
     // println!("RUP check failed.  Starting RAT check.");
     if self.verb { println!("c RUP check failed; starting RAT check on pivot {}.", reslit) }
 
-    if false_pivot {return Ok(false)}
+    if false_pivot { return Ok(false) }
 
     let forced = self.forced;
     self.rat_mode = true;
@@ -995,11 +994,10 @@ impl Solver {
     } else { self.check_rat(reslit) };
     clause = &self.db[index];
     if !success {
-      self.warn(|| println!(
-        "c WARNING: RAT check on proof pivot failed: {}", clause));
+      self.warn(|| println!("c WARNING: RAT check on proof pivot failed: {}", clause));
       for i in 0..size {
         let lit = clause[i];
-        if lit == reslit {continue}
+        if lit == reslit { continue }
         if self.check_rat(lit) {
           self.db[index].pivot = lit;
           success = true;

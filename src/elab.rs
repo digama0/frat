@@ -10,7 +10,7 @@ use super::midvec::MidVec;
 use super::dimacs::{parse_dimacs, parse_dimacs_map};
 use super::serialize::{Serialize, ModeWrite, ModeWriter};
 use super::parser::{detect_binary, Step, StepRef, ElabStep, ElabStepRef,
-  AddStep, Segment, Proof, Mode, Ascii, Bin, LRATParser, LRATStep};
+  AddStep, AddStepRef, Segment, Proof, Mode, Ascii, Bin, LRATParser, LRATStep};
 use super::backparser::{VecBackParser, BackParser, StepIter, ElabStepIter};
 use super::perm_clause::*;
 
@@ -190,6 +190,8 @@ struct RatHint {
   hint: Hint,
   pre_rat: Vec<i64>,
   rat_set: HashMap<usize, bool>,
+  witness: Vec<i64>,
+  witness_va: MidVec<bool>,
 }
 
 #[derive(Default)]
@@ -234,12 +236,12 @@ impl Context {
     for &lit in &*lits {
       self.max_var = self.max_var.max(lit.abs())
     }
+    self.va.reserve_to(self.max_var);
     let unit = self.sort_size(&mut lits) == (false, 1);
     let i = self.clauses.insert(Clause {marked, name, lits});
     assert!(self.names.insert(name, i).is_none(),
       "at {:?}: Clause {} to be inserted already exists", self.step, name);
     self.rat_set_lit = 0;
-    self.va.reserve_to(self.max_var);
     self.watch.0[0].reserve_to(self.max_var);
     self.watch.0[1].reserve_to(self.max_var);
     let lits = &*self.clauses[i];
@@ -619,8 +621,8 @@ impl Context {
     false
   }
 
-  fn rat_resolve_one(&mut self,
-    ls: &[i64], c: usize, pivot: i64, depth: usize,
+  fn pr_resolve_one(&mut self,
+    ls: &[i64], c: usize, witness_va: &MidVec<bool>, depth: usize,
     hint: Option<&[i64]>, strict: bool,
     out: &mut Hint, pre_rat: &mut Vec<i64>
   ) {
@@ -628,21 +630,21 @@ impl Context {
     let mark_start = out.temp.len();
     (|| {
       let cl = &self.clauses[c];
-      assert!(!strict || hint.is_some(), "Clause {:?} not in LRAT trace", cl.lits);
+      assert!(!strict || hint.is_some(), "Clause {} = {:?} not in LRAT trace", cl.name, cl.lits);
       out.steps.push(-(cl.name as i64));
       if let Some(k) = self.va.unsat() {
         self.finalize_hint(k, out);
         return
       }
       for x in cl {
-        if x != -pivot && !self.va.assign(-x, Reason::NONE) {
+        if !witness_va[-x] && !self.va.assign(-x, Reason::NONE) {
           self.finalize_hint(x, out);
           return
         }
       }
       assert!(self.build_step(&[], hint, strict, out, |_| None),
-        "Unit propagation stuck, cannot resolve clause {:?} with {:?} on pivot {}",
-        ls, self.clauses[c], pivot);
+        "Unit propagation stuck, cannot resolve clause {:?} with {:?}",
+        ls, self.clauses[c]);
     })();
 
     self.va.clear_to(depth);
@@ -659,18 +661,23 @@ impl Context {
     }
   }
 
-  fn run_rat_step<'a>(&mut self, ls: &[i64], init: Option<&[i64]>,
+  fn run_step<'a>(&mut self, ls: &[i64],
+    in_wit: Option<&[i64]>, init: Option<&[i64]>,
     mut rats: Option<(&'a i64, &'a [i64])>, strict: bool,
-    RatHint {hint: out, pre_rat, rat_set}: &mut RatHint
+    RatHint {hint: out, pre_rat, rat_set, witness, witness_va}: &mut RatHint
   ) {
     out.steps.clear();
-    if rats.is_none() {
-      if self.build_step(ls, init, strict, out, |this| {
+    witness.clear();
+    let success = if rats.is_none() {
+      self.build_step(ls, init, strict, out, |this| {
         // Special case: A RAT step which introduces a fresh variable is indistinguishable
         // from a non-RAT step, because there are no negative numbers in the LRAT proof since no
         // clauses contain the negated pivot literal. In this case a correct and optimal hint
         // is present but empty, and RUP fails quickly in this case. So we insert some extra code
         // here to avoid incurring the cost of propagate() in a 100% hints file.
+        //
+        // We assume that PR steps don't follow this path because any PR step with no touched
+        // clauses can be expressed as a PR step with only one witness literal, which is a RAT step.
         if !init?.is_empty() { return None }
         let pivot = *ls.first()?;
         if this.rat_set_lit == pivot {
@@ -681,28 +688,56 @@ impl Context {
           }
         }
         Some(())
-      }) {
-        self.clear_marks(out);
-        self.va.clear_hyps();
-        return
-      }
+      })
+    } else if let Some(k) = self.propagate_hint(ls, init.unwrap_or(&[]), strict) {
+      self.finalize_hint(k, out);
+      true
+    } else { false };
+
+    if success {
+      self.clear_marks(out);
+      self.va.clear_hyps();
+      return
     }
 
-    let (&pivot, ls1) = ls.split_first()
-      .expect("Unit propagation stuck, failed to prove empty clause");
-    let _ = self.propagate_hint(ls1, init.unwrap_or(&[]), strict);
+    if let Some(w) = in_wit {
+      for &lit in w {
+        assert!(!self.va.is_false(lit) ||
+            self.va.tru_stack.iter().rposition(|&l| l == -lit).unwrap() >= self.va.first_hyp,
+          "step failed, witness literal {} is complement of clause {:?}",
+          lit, self.clauses[self.va.reasons[-lit].clause().unwrap()]);
+        if !self.va.is_true(lit) { witness.push(lit) }
+      }
+    } else {
+      witness.push(*ls.first().expect("Unit propagation stuck, failed to prove empty clause"))
+    }
+
     let depth = self.va.tru_stack.len();
 
-    if self.rat_set_lit == pivot {
-      rat_set.values_mut().for_each(|seen| *seen = false)
+    if **witness == [self.rat_set_lit] {
+      rat_set.values_mut().for_each(|seen| *seen = false);
+      witness.iter().for_each(|&w| witness_va[w] = true);
     } else {
       rat_set.clear();
-      for (c, cl) in &self.clauses {
-        if cl.contains(&-pivot) {
-          assert!(rat_set.insert(c, false).is_none());
+      witness_va.reserve_to(self.max_var);
+      witness.iter().for_each(|&w| witness_va[w] = true);
+      if let [pivot] = **witness {
+        for (c, cl) in &self.clauses {
+          if cl.contains(&-pivot) {
+            assert!(rat_set.insert(c, false).is_none())
+          }
+        }
+        self.rat_set_lit = pivot
+      } else {
+        'next_clause: for (c, cl) in &self.clauses {
+          let mut red = false;
+          for lit in cl {
+            if witness_va[lit] { continue 'next_clause }
+            if witness_va[-lit] { red = true }
+          }
+          if red { assert!(rat_set.insert(c, false).is_none()) }
         }
       }
-      self.rat_set_lit = pivot;
     }
     let mut unseen = rat_set.len();
 
@@ -719,7 +754,7 @@ impl Context {
         rest
       };
       if let Some(seen @ &mut false) = rat_set.get_mut(&c) {
-        self.rat_resolve_one(ls, c, pivot, depth, Some(hint), strict, out, pre_rat);
+        self.pr_resolve_one(ls, c, witness_va, depth, Some(hint), strict, out, pre_rat);
         *seen = true;
         unseen -= 1;
       }
@@ -727,7 +762,7 @@ impl Context {
 
     if unseen != 0 {
       for (&c, _) in rat_set.iter().filter(|(_, &seen)| !seen) {
-        self.rat_resolve_one(ls, c, pivot, depth, None, strict, out, pre_rat);
+        self.pr_resolve_one(ls, c, witness_va, depth, None, strict, out, pre_rat);
       }
     }
 
@@ -740,6 +775,7 @@ impl Context {
     out.steps.extend(pre_rat.drain(..).filter(|&l| l != 0));
     self.clear_marks(out);
     self.va.clear_hyps();
+    witness.iter().for_each(|&w| witness_va[w] = false)
   }
 }
 
@@ -763,23 +799,21 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io:
 
       Step::Add(i, step, p) => {
         ctx.step = i;
-        let c = ctx.remove(i);
+        let mut c = ctx.remove(i);
         let kind = step.parse();
         let ls = kind.lemma();
         c.check_subsumed(ls, ctx.step);
         if full || c.marked {
-          if kind.witness().is_some() {
-            println!("Warning: step {} contains PR witness, ignoring...", i)
-          }
+          let wit = kind.witness();
           if let Some(Proof::LRAT(is)) = p {
             if let Some(start) = is.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
               let (init, rest) = is.split_at(start);
-              ctx.run_rat_step(&c, Some(init), rest.split_first(), false, hint)
+              ctx.run_step(&c, wit, Some(init), rest.split_first(), false, hint)
             } else {
-              ctx.run_rat_step(&c, Some(&is), None, false, hint)
+              ctx.run_step(&c, wit, Some(&is), None, false, hint)
             }
           } else {
-            ctx.run_rat_step(&c, None, None, false, hint)
+            ctx.run_step(&c, wit, None, None, false, hint)
           };
           let steps = &*hint.hint.steps;
           for &i in steps {
@@ -798,7 +832,16 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io:
               if !full { ElabStep::Del(i).write(w)? }
             }
           }
-          ElabStepRef::add(i, &c.lits, steps).write(w)?
+          if let Some(&lit) = hint.witness.first() {
+            let k = c.lits.iter().position(|&lit2| lit == lit2).unwrap();
+            c.lits.swap(0, k);
+          }
+          let add = if hint.witness.len() <= 1 {
+            AddStepRef::One(&c.lits)
+          } else {
+            AddStepRef::Two(&c.lits, &hint.witness)
+          };
+          ElabStepRef::Add(i, add, steps).write(w)?
         }
         // else { eprintln!("delete {}", i); }
       }
@@ -1049,14 +1092,14 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
         assert!(i > k, "out-of-order LRAT proofs not supported");
         k = i;
         let add = add.parse_into(|kind| {
-          assert!(kind.witness().is_none(), "LPR proofs not supported");
           let ls = kind.lemma();
+          let wit = kind.witness();
           // eprintln!("{}: {:?} {:?}", k, ls, p);
           if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
             let (init, rest) = p.split_at(start);
-            ctx.run_rat_step(ls, Some(init), rest.split_first(), true, hint);
+            ctx.run_step(ls, wit, Some(init), rest.split_first(), true, hint);
           } else {
-            ctx.run_rat_step(ls, Some(&p), None, true, hint);
+            ctx.run_step(ls, wit, Some(&p), None, true, hint);
           }
         }).1;
         if add.is_empty() { return Ok(()) }

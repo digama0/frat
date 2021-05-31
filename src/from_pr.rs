@@ -223,7 +223,7 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
         let (unsat, lemma) = add.parse_into(|add| {
           if add.lemma().is_empty() { return Ok(true) }
           match add {
-            AddKind::DRAT(lemma) => { k += 1; StepRef::add(k, lemma, None).write(w) }
+            AddKind::RAT(lemma) => { k += 1; StepRef::add(k, lemma, None).write(w) }
             AddKind::PR(lemma, witness) =>
               add_pr_step(&mut temp, &mut k, &ctx, w, opt, lemma, witness, maxvar + 1),
           }.map(|_| false)

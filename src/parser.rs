@@ -231,7 +231,7 @@ impl Proof {
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AddStep(pub Vec<i64>);
 
 #[derive(Debug, Copy, Clone)]
@@ -242,26 +242,26 @@ pub enum AddStepRef<'a> {
 
 #[derive(Debug, Copy, Clone)]
 pub enum AddKind<'a> {
-  DRAT(&'a [i64]),
+  RAT(&'a [i64]),
   PR(&'a [i64], &'a [i64]),
 }
 impl<'a> AddKind<'a> {
   pub fn lemma(&self) -> &'a [i64] {
     match *self {
-      AddKind::DRAT(lemma) | AddKind::PR(lemma, _) => lemma,
+      AddKind::RAT(lemma) | AddKind::PR(lemma, _) => lemma,
     }
   }
 
   pub fn witness(&self) -> Option<&'a [i64]> {
     match *self {
-      AddKind::DRAT(_) => None,
+      AddKind::RAT(_) => None,
       AddKind::PR(_, witness) => Some(witness),
     }
   }
 
   #[allow(unused)] pub fn as_ref(self) -> AddStepRef<'a> {
     match self {
-      AddKind::DRAT(lemma) => AddStepRef::One(lemma),
+      AddKind::RAT(lemma) => AddStepRef::One(lemma),
       AddKind::PR(lemma, witness) => AddStepRef::Two(lemma, witness),
     }
   }
@@ -276,7 +276,7 @@ impl AddStep {
       let (lemma, witness) = self.0.split_at(i+1);
       AddKind::PR(lemma, witness)
     } else {
-      AddKind::DRAT(&self.0)
+      AddKind::RAT(&self.0)
     }
   }
 
@@ -290,6 +290,10 @@ impl AddStep {
       self.0
     })
   }
+}
+
+impl std::fmt::Debug for AddStep {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { self.parse().fmt(f) }
 }
 
 #[derive(Debug)]
@@ -358,8 +362,3 @@ impl ElabStep {
   }
 }
 
-impl<'a> ElabStepRef<'a> {
-  #[inline] pub fn add(idx: u64, step: &'a [i64], proof: &'a [i64]) -> Self {
-    Self::Add(idx, AddStepRef::One(step), proof)
-  }
-}
