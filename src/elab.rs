@@ -654,7 +654,7 @@ impl Context {
       if self.va.is_true(*lit) {
         if let Some(c) = self.va.reasons[*lit].clause() {
           let mut name = self.clauses[c].name as i64;
-          while next.peek() != Some(&&mut name) {next.next().unwrap();}
+          while next.peek() != Some(&&mut name) { next.next().unwrap(); }
           pre_rat.push(mem::take(next.next().unwrap()))
         }
       } else { *lit = 0 }
@@ -743,8 +743,14 @@ impl Context {
 
     mem::swap(&mut out.steps, pre_rat);
 
+    let mut last = None;
     while let Some((&s, rest)) = rats {
-      let c = self.get(-s as u64);
+      let c = -s as u64;
+      if strict {
+        assert!(last.map_or(true, |l| l < c), "RAT steps must be sorted");
+        last = Some(c);
+      }
+      let c = self.get(c);
       let hint = if let Some(i) = rest.iter().position(|&i| i < 0) {
         let (chain, r) = rest.split_at(i);
         rats = r.split_first();
@@ -904,6 +910,7 @@ fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut imp
   let mut bp = ElabStepIter(temp_it).peekable();
   let origs = k;
   let mut used_origs = vec![0u8; origs as usize];
+  let mut rats = vec![];
 
   while let Some(ElabStep::Orig(_, _)) = bp.peek() {
     if let Some(ElabStep::Orig(i, ls)) = bp.next() {
@@ -936,7 +943,7 @@ fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut imp
       ElabStep::Orig(_, _) =>
         panic!("Orig steps must come at the beginning of the temp file"),
 
-      ElabStep::Add(i, AddStep(ls), is) => {
+      ElabStep::Add(i, AddStep(ls), mut is) => {
         k += 1; // Get the next fresh ID
         map.insert(i, k); // The ID of added clause is mapped to a fresh ID
         // eprintln!("{} -> {}", i, k);
@@ -945,11 +952,28 @@ fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut imp
         write!(lrat, "{}", k)?;
         for &x in &*ls { write!(lrat, " {}", x)? }
         write!(lrat, " 0")?;
-        for x in is {
+        let mut last_neg = None;
+        for (i, x) in is.iter_mut().enumerate() {
           let ux = x.abs() as u64;
           let lit = *map.get(&ux).unwrap_or_else(||
             panic!("step {}: proof step {:?} not found", i, ux)) as i64;
-          write!(lrat, " {}", if x < 0 {-lit} else {lit})?
+          *x = if *x < 0 {
+            if let Some((lit, j)) = last_neg { rats.push((lit, j, i)) }
+            last_neg = Some((lit, i));
+            -lit
+          } else {
+            lit
+          };
+        }
+        if let Some((lit, j)) = last_neg { rats.push((lit, j, is.len())) }
+        if let [(_, start, _), ..] = *rats {
+          rats.sort_by_key(|p| p.0);
+          for &i in &is[..start] { write!(lrat, " {}", i)? }
+          for (_, start, end) in rats.drain(..) {
+            for &i in &is[start..end] { write!(lrat, " {}", i)? }
+          }
+        } else {
+          for &i in &is { write!(lrat, " {}", i)? }
         }
         writeln!(lrat, " 0")?;
 
