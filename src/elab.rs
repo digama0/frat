@@ -204,6 +204,7 @@ struct Context {
   va: VAssign,
   rat_set_lit: i64,
   step: u64,
+  strict: bool,
 }
 
 fn dedup_vec<T: PartialEq>(vec: &mut Vec<T>) {
@@ -253,7 +254,7 @@ impl Context {
         self.watch.add(marked, l2, i);
       }
     }
-    if unit { self.va.add_unit(lits[0], i); }
+    if !self.strict && unit { self.va.add_unit(lits[0], i); }
   }
 
   fn remove(&mut self, name: u64) -> Clause {
@@ -551,7 +552,7 @@ impl Context {
     log.flush()
   }
 
-  fn propagate_hint(&mut self, ls: &[i64], is: &[i64], strict: bool) -> Option<i64> {
+  fn propagate_hint(&mut self, ls: &[i64], is: &[i64]) -> Option<i64> {
     // if verb {
     //   println!("propagate_hint {:?} {:?}", ls, is);
     //   let _ = self.log_status("unit_prop_before.log", ls);
@@ -559,7 +560,7 @@ impl Context {
 
     if let Some(k) = self.va.unsat() { return Some(k) }
 
-    if !self.va.units_processed {
+    if !self.strict && !self.va.units_processed {
       for (&c, &l) in &self.units {
         if !self.va.is_true(l) { self.va.add_unit(l, c) }
       }
@@ -584,7 +585,7 @@ impl Context {
         let unsat = if let Some(i) = (1..cl.len()).find(|&i| !va.is_false(cl[i])) {
           let l = cl[0];
           if !va.is_false(l) || cl.lits[i+1..].iter().any(|&l| !va.is_false(l)) {
-            assert!(!strict, "at {:?}: clause {:?} is not unit", self.step, cl.name);
+            assert!(!self.strict, "at {:?}: clause {:?} is not unit", self.step, cl.name);
             queue.push(c);
             continue
           }
@@ -605,14 +606,15 @@ impl Context {
     }
   }
 
-  fn build_step(&mut self, ls: &[i64], hint: Option<&[i64]>, strict: bool, out: &mut Hint,
+  fn build_step(&mut self, ls: &[i64], hint: Option<&[i64]>, out: &mut Hint,
     fallback: impl FnOnce(&mut Self) -> Option<()>,
   ) -> bool {
     if let Some(is) = hint {
-      if let Some(k) = self.propagate_hint(ls, is, strict) {
+      if let Some(k) = self.propagate_hint(ls, is) {
         self.finalize_hint(k, out);
         return true
       } else if fallback(self).is_some() { return true }
+      if self.strict { return false }
     }
     if let Some(k) = self.propagate(ls) {
       self.finalize_hint(k, out);
@@ -623,14 +625,14 @@ impl Context {
 
   fn pr_resolve_one(&mut self,
     ls: &[i64], c: usize, witness_va: &MidVec<bool>, depth: usize,
-    hint: Option<&[i64]>, strict: bool,
-    out: &mut Hint, pre_rat: &mut Vec<i64>
+    hint: Option<&[i64]>, out: &mut Hint, pre_rat: &mut Vec<i64>
   ) {
     let step_start = out.steps.len();
     let mark_start = out.temp.len();
     (|| {
       let cl = &self.clauses[c];
-      assert!(!strict || hint.is_some(), "Clause {} = {:?} not in LRAT trace", cl.name, cl.lits);
+      assert!(!self.strict || hint.is_some(),
+        "Clause {} = {:?} not in LRAT trace", cl.name, cl.lits);
       out.steps.push(-(cl.name as i64));
       if let Some(k) = self.va.unsat() {
         self.finalize_hint(k, out);
@@ -642,7 +644,7 @@ impl Context {
           return
         }
       }
-      assert!(self.build_step(&[], hint, strict, out, |_| None),
+      assert!(self.build_step(&[], hint, out, |_| None),
         "Unit propagation stuck, cannot resolve clause {:?} with {:?}",
         ls, self.clauses[c]);
     })();
@@ -663,13 +665,13 @@ impl Context {
 
   fn run_step<'a>(&mut self, ls: &[i64],
     in_wit: Option<&[i64]>, init: Option<&[i64]>,
-    mut rats: Option<(&'a i64, &'a [i64])>, strict: bool,
+    mut rats: Option<(&'a i64, &'a [i64])>,
     RatHint {hint: out, pre_rat, rat_set, witness, witness_va}: &mut RatHint
   ) {
     out.steps.clear();
     witness.clear();
     let success = if rats.is_none() {
-      self.build_step(ls, init, strict, out, |this| {
+      self.build_step(ls, init, out, |this| {
         // Special case: A RAT step which introduces a fresh variable is indistinguishable
         // from a non-RAT step, because there are no negative numbers in the LRAT proof since no
         // clauses contain the negated pivot literal. In this case a correct and optimal hint
@@ -689,7 +691,7 @@ impl Context {
         }
         Some(())
       })
-    } else if let Some(k) = self.propagate_hint(ls, init.unwrap_or(&[]), strict) {
+    } else if let Some(k) = self.propagate_hint(ls, init.unwrap_or(&[])) {
       self.finalize_hint(k, out);
       true
     } else { false };
@@ -746,7 +748,7 @@ impl Context {
     let mut last = None;
     while let Some((&s, rest)) = rats {
       let c = -s as u64;
-      if strict {
+      if self.strict {
         assert!(last.map_or(true, |l| l < c), "RAT steps must be sorted");
         last = Some(c);
       }
@@ -760,7 +762,7 @@ impl Context {
         rest
       };
       if let Some(seen @ &mut false) = rat_set.get_mut(&c) {
-        self.pr_resolve_one(ls, c, witness_va, depth, Some(hint), strict, out, pre_rat);
+        self.pr_resolve_one(ls, c, witness_va, depth, Some(hint), out, pre_rat);
         *seen = true;
         unseen -= 1;
       }
@@ -768,7 +770,7 @@ impl Context {
 
     if unseen != 0 {
       for (&c, _) in rat_set.iter().filter(|(_, &seen)| !seen) {
-        self.pr_resolve_one(ls, c, witness_va, depth, None, strict, out, pre_rat);
+        self.pr_resolve_one(ls, c, witness_va, depth, None, out, pre_rat);
       }
     }
 
@@ -823,12 +825,12 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io:
           if let Some(Proof::LRAT(is)) = p {
             if let Some(start) = is.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
               let (init, rest) = is.split_at(start);
-              ctx.run_step(&c, wit, Some(init), rest.split_first(), false, hint)
+              ctx.run_step(&c, wit, Some(init), rest.split_first(), hint)
             } else {
-              ctx.run_step(&c, wit, Some(&is), None, false, hint)
+              ctx.run_step(&c, wit, Some(&is), None, hint)
             }
           } else {
-            ctx.run_step(&c, wit, None, None, false, hint)
+            ctx.run_step(&c, wit, None, None, hint)
           };
           let steps = &*hint.hint.steps;
           for &i in steps {
@@ -1098,6 +1100,7 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
   let lp = LRATParser::from(mode, lrat);
   let mut k = 0;
   let ctx = &mut Context::default();
+  ctx.strict = true;
   let hint = &mut RatHint::default();
 
   for c in cnf {
@@ -1121,9 +1124,9 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
           // eprintln!("{}: {:?} {:?}", k, ls, p);
           if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
             let (init, rest) = p.split_at(start);
-            ctx.run_step(ls, wit, Some(init), rest.split_first(), true, hint);
+            ctx.run_step(ls, wit, Some(init), rest.split_first(), hint);
           } else {
-            ctx.run_step(ls, wit, Some(&p), None, true, hint);
+            ctx.run_step(ls, wit, Some(&p), None, hint);
           }
         }).1;
         if add.is_empty() { return Ok(()) }
