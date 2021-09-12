@@ -12,8 +12,11 @@ mod strip_frat;
 mod drat_trim;
 mod from_pr;
 
-use std::env;
-use std::io;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::BuildHasherDefault;
+use std::{env, io};
+
+pub type HashMap<K, V> = std::collections::HashMap<K, V, BuildHasherDefault<DefaultHasher>>;
 
 fn main() -> io::Result<()> {
   let mut args = env::args().skip(1);

@@ -1,9 +1,9 @@
-use std::collections::{BTreeMap, HashMap, hash_map::DefaultHasher};
+use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::fs::{File, read_to_string};
-use std::hash::BuildHasherDefault;
 use std::io::{self, Read, Write, Seek, SeekFrom, BufReader, BufWriter};
 
+use crate::HashMap;
 use crate::dimacs::parse_dimacs;
 use crate::midvec::MidVec;
 use crate::parser::{Mode, StepRef, Ascii, Bin, AddKind, DRATParser, DRATStep, detect_binary};
@@ -29,7 +29,7 @@ struct PrStep {
 
 type M = Bin;
 
-type Context = HashMap<PermClause, Vec<u64>, BuildHasherDefault<DefaultHasher>>;
+type Context = HashMap<PermClause, Vec<u64>>;
 
 fn add_pr_step(
   PrStep {assignment, phase4_pfs, marked}: &mut PrStep,

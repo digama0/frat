@@ -1,9 +1,9 @@
 use std::fs::File;
 use std::process::exit;
-use std::collections::HashMap;
 use std::io;
-use super::parser::{detect_binary, Mode, Ascii, Bin};
-use super::backparser::*;
+use crate::HashMap;
+use crate::parser::{detect_binary, Mode, Ascii, Bin};
+use crate::backparser::*;
 
 type Clause = Vec<i64>;
 
@@ -16,8 +16,8 @@ pub fn check_proof(mode: impl Mode, proof: File) -> io::Result<()> {
   let (mut orig, mut added, mut deleted, mut fin) = (0i64, 0i64, 0i64, 0i64);
   let (mut dirty_orig, mut dirty_add, mut double_del, mut double_fin) = (0i64, 0i64, 0i64, 0i64);
   let mut missing = 0i64;
-  let mut active: HashMap<u64, (bool, Clause)> = HashMap::new();
-  let mut todos = HashMap::new();
+  let mut active: HashMap<u64, (bool, Clause)> = HashMap::default();
+  let mut todos = HashMap::default();
   let mut bad = false;
   while let Some(s) = bp.next() {
     // println!("{:?}", s);

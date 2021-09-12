@@ -1,16 +1,16 @@
 use std::io::{self, Seek, SeekFrom, Read, BufReader, Write, BufWriter};
 use std::fs::{File, read_to_string};
-use std::collections::HashMap;
-use super::dimacs::parse_dimacs;
-use super::parser::{detect_binary, Mode, Bin, Ascii, DRATParser, DRATStep, StepRef};
-use super::serialize::{ModeWriter, Serialize};
-use super::perm_clause::*;
+use crate::HashMap;
+use crate::dimacs::parse_dimacs;
+use crate::parser::{detect_binary, Mode, Bin, Ascii, DRATParser, DRATStep, StepRef};
+use crate::serialize::{ModeWriter, Serialize};
+use crate::perm_clause::*;
 
 fn from_drat(mode: impl Mode, cnf: Vec<Box<[i64]>>, drat: File, frat: File) -> io::Result<()> {
   let drat = DRATParser::from(mode, BufReader::new(drat).bytes().map(Result::unwrap));
   let w = &mut ModeWriter(Bin, BufWriter::new(frat));
   let mut k = 0; // Counter for the last used ID
-  let mut ctx: HashMap<PermClause, Vec<u64>> = HashMap::new(); // current context
+  let mut ctx: HashMap<PermClause, Vec<u64>> = HashMap::default(); // current context
   for ls in cnf {
     k += 1;
     StepRef::Orig(k, &ls).write(w)?;

@@ -3,9 +3,9 @@ use std::fs::{File, read_to_string};
 use std::convert::TryInto;
 use std::mem;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
-use std::collections::HashMap;
 use slab::Slab;
 
+use crate::HashMap;
 use super::midvec::MidVec;
 use super::dimacs::{parse_dimacs, parse_dimacs_map};
 use super::serialize::{Serialize, ModeWrite, ModeWriter};
@@ -280,7 +280,7 @@ impl Context {
   }
 
   fn reloc(&mut self, relocs: &mut Vec<(u64, u64)>) {
-    let mut m = HashMap::new();
+    let mut m = HashMap::default();
     let mut removed = Vec::new();
     relocs.retain(|&(from, to)| {
       if let Some(addr) = self.names.remove(&to) {
@@ -906,7 +906,7 @@ fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut imp
   let mut k = 0u64; // Counter for the last used ID
   let cnf: HashMap<PermClauseRef, u64> = // original CNF
     cnf.iter().map(|c| (PermClauseRef(c), {k += 1; k})).collect();
-  let mut map: HashMap<u64, u64> = HashMap::new(); // Mapping between old and new IDs
+  let mut map: HashMap<u64, u64> = HashMap::default(); // Mapping between old and new IDs
   let mut bp = ElabStepIter(temp_it).peekable();
   let origs = k;
   let mut used_origs = vec![0u8; origs as usize];
@@ -1149,7 +1149,7 @@ pub fn lratchk(mut args: impl Iterator<Item=String>) -> io::Result<()> {
 
 fn refrat_pass(elab: File, w: &mut impl ModeWrite) -> io::Result<()> {
 
-  let mut ctx: HashMap<u64, Vec<i64>> = HashMap::new();
+  let mut ctx: HashMap<u64, Vec<i64>> = HashMap::default();
   for s in ElabStepIter(BackParser::new(Bin, elab)?) {
     // eprintln!("-> {:?}", s);
 
