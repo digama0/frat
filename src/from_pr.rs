@@ -270,7 +270,7 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   let bin = detect_binary(&mut pr)?;
   pr.seek(SeekFrom::Start(0))?;
   let frat = File::create(args.next().expect("missing output file"))?;
-  let opt = if let Some("-O") = args.next().as_deref() {true} else {false};
+  let opt = matches!(args.next().as_deref(), Some("-O"));
   if bin { from_pr(Bin, cnf, pr, frat, opt) }
   else { from_pr(Ascii, cnf, pr, frat, opt) }
 }

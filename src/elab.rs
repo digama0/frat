@@ -678,13 +678,13 @@ impl Context {
         //
         // We assume that PR steps don't follow this path because any PR step with no touched
         // clauses can be expressed as a PR step with only one witness literal, which is a RAT step.
-        if !init?.is_empty() { return None }
+        init?.is_empty().then(|| ())?;
         let pivot = *ls.first()?;
         if this.rat_set_lit == pivot {
-          if !rat_set.is_empty() { return None }
+          rat_set.is_empty().then(|| ())?
         } else {
           for (_, cl) in &this.clauses {
-            if cl.contains(&-pivot) { return None }
+            (!cl.contains(&-pivot)).then(|| ())?
           }
         }
         Some(())
@@ -779,6 +779,15 @@ impl Context {
   }
 }
 
+fn as_add_step<'a>(lits: &'a mut [i64], witness: &'a [i64]) -> AddStepRef<'a> {
+  if let Some(&lit) = witness.first() {
+    let k = lits.iter().position(|&lit2| lit == lit2).unwrap();
+    lits.swap(0, k);
+  }
+  if witness.len() <= 1 { AddStepRef::One(lits) }
+  else { AddStepRef::Two(lits, witness) }
+}
+
 fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io::Result<()> {
   let mut origs = Vec::new();
   let ctx = &mut Context::default();
@@ -832,16 +841,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io:
               if !full { ElabStep::Del(i).write(w)? }
             }
           }
-          if let Some(&lit) = hint.witness.first() {
-            let k = c.lits.iter().position(|&lit2| lit == lit2).unwrap();
-            c.lits.swap(0, k);
-          }
-          let add = if hint.witness.len() <= 1 {
-            AddStepRef::One(&c.lits)
-          } else {
-            AddStepRef::Two(&c.lits, &hint.witness)
-          };
-          ElabStepRef::Add(i, add, steps).write(w)?
+          ElabStepRef::Add(i, as_add_step(&mut c.lits, &hint.witness), steps).write(w)?
         }
         // else { eprintln!("delete {}", i); }
       }
