@@ -1131,7 +1131,8 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
       }
 
       LRATStep::Del(ls) => {
-        assert!(i == k, "out-of-order LRAT proofs not supported");
+        assert!(i >= k, "out-of-order LRAT proofs not supported");
+        k = i;
         for c in ls { ctx.remove(c.try_into().unwrap()); }
       }
     }
