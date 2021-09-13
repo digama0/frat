@@ -205,6 +205,7 @@ struct Context {
   rat_set_lit: i64,
   step: u64,
   strict: bool,
+  full: bool,
 }
 
 fn dedup_vec<T: PartialEq>(vec: &mut Vec<T>) {
@@ -628,27 +629,30 @@ impl Context {
     ls: &[i64], c: usize, witness_va: &MidVec<bool>, depth: usize,
     hint: Option<&[i64]>, out: &mut Hint, pre_rat: &mut Vec<i64>
   ) {
+    let cl = &self.clauses[c];
+    if !self.full && !cl.marked { return }
     let step_start = out.steps.len();
     let mark_start = out.temp.len();
-    (|| {
-      let cl = &self.clauses[c];
+    #[allow(clippy::never_loop)]
+    'done: loop {
       assert!(!self.strict || hint.is_some(),
         "Clause {} = {:?} not in LRAT trace", cl.name, cl.lits);
       out.steps.push(-(cl.name as i64));
       if let Some(k) = self.va.unsat() {
         self.finalize_hint(k, out);
-        return
+        break 'done
       }
       for x in cl {
         if !witness_va[-x] && !self.va.assign(-x, Reason::NONE) {
           self.finalize_hint(x, out);
-          return
+          break 'done
         }
       }
       assert!(self.build_step(&[], hint, out, |_| None),
         "Unit propagation stuck, cannot resolve clause {:?} with {:?}",
         ls, self.clauses[c]);
-    })();
+      break
+    }
 
     self.va.clear_to(depth);
 
@@ -800,6 +804,7 @@ fn as_add_step<'a>(lits: &'a mut [i64], witness: &'a [i64]) -> AddStepRef<'a> {
 fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io::Result<()> {
   let mut origs = Vec::new();
   let ctx = &mut Context::default();
+  ctx.full = full;
   let hint = &mut RatHint::default();
   for s in StepIter(BackParser::new(mode, frat)?) {
     // eprintln!("<- {:?}", s);
@@ -1102,6 +1107,7 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
   let mut k = 0;
   let ctx = &mut Context::default();
   ctx.strict = true;
+  ctx.full = true;
   let hint = &mut RatHint::default();
 
   for c in cnf {
