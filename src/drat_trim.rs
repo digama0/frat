@@ -1582,20 +1582,21 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
         1 => {
           #[allow(clippy::manual_range_contains)]
           fn detect_binary(file: &str) -> io::Result<bool> {
-            fn nonascii(c: u8) -> bool {
-              (c != 13) && (c != 32) && (c != 45) && ((c < 48) || (c > 57)) && (c != 99) && (c != 100)
+            fn ascii(c: u8) -> bool {
+              c == b'\r' || c == b' ' || c == b'-' ||
+              (b'0'..=b'9').contains(&c) || c == b'c' || c == b'd'
             }
             let mut file = File::open(file)?.bytes();
             let c = if let Some(c) = file.next() {c?} else {return Ok(true)};
-            if nonascii(c) { return Ok(true) }
-            let mut comment = c == 99;
+            if !ascii(c) { return Ok(true) }
+            let mut comment = c == b'c';
             let c = if let Some(c) = file.next() {c?} else {return Ok(true)};
-            if nonascii(c) { return Ok(true) }
-            comment &= c == 32;
+            if !ascii(c) { return Ok(true) }
+            comment &= c == b' ';
             for c in file.take(10) {
               let c = c?;
-              if (c != 100) && (c != 10) && (c != 13) && (c != 32) && (c != 45) &&
-                ((c < 48) || (c > 57)) && (comment && ((c < 65) || (c > 122))) {
+              if !(c == b'd' || c == b'\n' || c == b'\r' || c == b' ' || c == b'-' ||
+                (b'0'..=b'9').contains(&c) || !comment || (b'A'..=b'z').contains(&c)) {
                 return Ok(true)
               }
             }
