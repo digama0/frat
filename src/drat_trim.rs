@@ -221,6 +221,8 @@ struct SolverOpts {
   backforce: bool,
   /// reduce mode
   reduce: bool,
+  /// full mode (check all lemmas)
+  full: bool,
   mode: Mode,
   /// more verbose output
   verb: bool,
@@ -253,6 +255,7 @@ impl SolverOpts {
       mode: Mode::BackwardUnsat,
       delete: true,
       reduce: true,
+      full: false,
       bin_mode: false,
       bin_output: false,
       start_time: Instant::now(),
@@ -938,7 +941,7 @@ impl Solver {
     let witness = clause.witness;
     if self.verb { println!("c checking lemma ({}, {}) {}", size, reslit, clause) }
 
-    if !matches!(self.mode, Mode::ForwardUnsat) && !clause.active() {return Ok(true)}
+    if !self.full && !clause.active() {return Ok(true)}
 
     if sat {
       let reason = reason!(self, clause[0]);
@@ -1247,7 +1250,7 @@ impl Solver {
     let max = adds as f64;
     let backward_time = Instant::now();
     for step in (0..=last_step).rev() {
-      let runtime = Instant::now().saturating_duration_since(backward_time);
+      let runtime = backward_time.elapsed();
       if runtime.as_secs() > self.timeout && !self.optimize {
         println!("s TIMEOUT");
         return Ok(VerifyResult::Fail)
@@ -1293,7 +1296,7 @@ impl Solver {
         let (sat, size) = self.sort_size(ad.clause());
         let clause = &mut self.db[ad.clause()];
         self.time = clause.ida;
-        if !self.time.active() {
+        if !self.opts.full && !self.time.active() {
           _skipped += 1;
           continue
         }
@@ -1521,6 +1524,7 @@ fn print_help() -> ! {
     \n  -t <lim>    time limit in seconds (default {})\
     \n  -u          default unit propatation (i.e., no core-first)\
     \n  -f          forward mode for UNSAT\
+    \n  -F          full mode (check non-core lemmas)\
     \n  -v          more verbose output\
     \n  -b          show progress bar\
     \n  -B          ??? undocumented option backforce\
@@ -1573,6 +1577,7 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
         "p" => opts.delete = false,
         "R" => opts.reduce = false,
         "f" => opts.mode = Mode::ForwardUnsat,
+        "F" => opts.full = true,
         "S" => opts.mode = Mode::ForwardSat,
         _ => {}
       }
@@ -1618,6 +1623,7 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
     println!("c reading proof from stdin")
   }
   opts.reduce &= opts.lrat_file.is_none() && !matches!(opts.mode, Mode::ForwardUnsat);
+  opts.full |= matches!(opts.mode, Mode::ForwardUnsat);
   let (mut unsat, mut s) = Solver::parse(opts, input_file, proof_file);
   if let Some(proof) = proof_str.filter(|_| s.del_proof) {
     std::fs::remove_file(&proof)?;
