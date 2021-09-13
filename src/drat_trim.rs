@@ -30,9 +30,9 @@ enum Warning {
   /// display warning messages
   Normal,
   /// suppress warning messages
-  NoWarning,
+  None,
   /// exit after first warning
-  HardWarning,
+  Hard,
 }
 
 #[repr(u8)] #[derive(Copy, Clone, Debug)]
@@ -262,8 +262,8 @@ impl SolverOpts {
   fn warn(&self, f: impl FnOnce()) {
     match self.warning {
       Warning::Normal => f(),
-      Warning::NoWarning => {}
-      Warning::HardWarning => {
+      Warning::None => {}
+      Warning::Hard => {
         f();
         std::process::exit(80);
       }
@@ -360,7 +360,7 @@ impl Solver {
   fn remove_watch(&mut self, clause: usize, lit: i64) {
     let watch = &mut self.watch_list[lit];
     if watch.len() > INIT && watch.capacity() > 2 * watch.len() {
-      shrink_vec(watch, 3 * watch.len() >> 1);
+      shrink_vec(watch, (3 * watch.len()) >> 1);
     }
     let i = watch.iter().position(|&w| w.clause() == clause).unwrap();
     watch.swap_remove(i);
@@ -409,9 +409,9 @@ impl Solver {
   }
 
   fn add_dependency(&mut self, dep: Dependency) {
-    if true || self.trace_file.is_some() || self.lrat_file.is_some() {
-      self.deps.push(dep);
-    }
+    // if self.trace_file.is_some() || self.lrat_file.is_some() {
+    self.deps.push(dep);
+    // }
   }
 
   fn mark_clause(&mut self, clause: usize, skip_index: usize, forced: bool) {
@@ -758,11 +758,9 @@ impl Solver {
         for &cls in self.deps.iter().rev() {
           if mode {
             if cls.forced() {chain.push(cls.id())}
-          } else if cls.is_pos() {
-            if !self.pre_rat.contains(&cls) {
-              self.pre_rat.push(cls);
-              chain.push(cls.id());
-            }
+          } else if cls.is_pos() && !self.pre_rat.contains(&cls) {
+            self.pre_rat.push(cls);
+            chain.push(cls.id());
           }
         }
 
@@ -1200,7 +1198,7 @@ impl Solver {
         Mode::ForwardUnsat => {
           self.postprocess()?;
           println!("c VERIFIED derivation: all lemmas preserve satisfiability");
-          if !matches!(self.warning, Warning::NoWarning) {
+          if !matches!(self.warning, Warning::None) {
             println!("c WARNING: no empty clause detected, this is not a refutation");
           }
           return Ok(VerifyResult::Derivation)
@@ -1419,7 +1417,7 @@ impl Solver {
           .map(|i| lits.drain(i+1..).collect()))
       } else { (0, None) };
       let wit = Witness::new(wit.map(|w| {let n = witness.len(); witness.push(w); n}));
-      lits.sort();
+      lits.sort_unstable();
       if lits.len() != {lits.dedup(); lits.len()} {
         opts.warn(|| println!(
           "c WARNING: detected and deleted duplicate literals at line {}", line));
@@ -1553,8 +1551,8 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   let mut proof_file: Either<StdinLock, BufReader<File>> = Either::Left(stdin.lock());
   let mut proof_str = None;
   while let Some(arg) = args.next() {
-    if arg.starts_with("-") {
-      match &arg[1..] {
+    if let Some(opt) = arg.strip_prefix('-') {
+      match opt {
         "h" => print_help(),
         "c" => opts.core_str = Some(args.next().expect("expected -c CORE")),
         "a" => opts.active_file = Some(BufWriter::new(File::create(args.next().expect("expected -a ACTIVE"))?)),
@@ -1570,8 +1568,8 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
         "i" => opts.bin_mode = true,
         "u" => opts.mask = true,
         "v" => opts.verb = true,
-        "w" => opts.warning = Warning::NoWarning,
-        "W" => opts.warning = Warning::HardWarning,
+        "w" => opts.warning = Warning::None,
+        "W" => opts.warning = Warning::Hard,
         "p" => opts.delete = false,
         "R" => opts.reduce = false,
         "f" => opts.mode = Mode::ForwardUnsat,
@@ -1582,6 +1580,7 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
       match tmp.next().unwrap() {
         0 => input_file = Some(File::open(arg)?),
         1 => {
+          #[allow(clippy::manual_range_contains)]
           fn detect_binary(file: &str) -> io::Result<bool> {
             fn nonascii(c: u8) -> bool {
               (c != 13) && (c != 32) && (c != 45) && ((c < 48) || (c > 57)) && (c != 99) && (c != 100)

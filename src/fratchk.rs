@@ -44,7 +44,7 @@ pub fn check_proof(mode: impl Mode, proof: File) -> io::Result<()> {
         }
         if let Some((need, lits2)) = active.remove(&i) {
           let lits = step.parse().lemma();
-          if !subsumes(&lits2, &lits) {
+          if !subsumes(&lits2, lits) {
             eprintln!("added {:?}, removed {:?}", lits2, lits);
             bad = true;
           }

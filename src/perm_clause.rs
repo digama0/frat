@@ -16,7 +16,7 @@ pub fn get_clause_hash(lits: &[i64]) -> Wrapping<u64> {
 }
 
 impl<'a> Hash for PermClauseRef<'a> {
-  fn hash<H: Hasher>(&self, h: &mut H) { get_clause_hash(&self.0).hash(h) }
+  fn hash<H: Hasher>(&self, h: &mut H) { get_clause_hash(self.0).hash(h) }
 }
 
 impl<'a> PartialEq for PermClauseRef<'a> {

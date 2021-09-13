@@ -597,7 +597,7 @@ impl Context {
           }
           false
         } else { k = cl[0]; va.is_false(k) };
-        assert!(va.assign(k, Reason::new(c)) == !unsat);
+        assert!(va.assign(k, Reason::new(c)) != unsat);
         if unsat { return Some(k) }
         progress = true;
       }
@@ -623,6 +623,7 @@ impl Context {
     false
   }
 
+  #[allow(clippy::too_many_arguments)]
   fn pr_resolve_one(&mut self,
     ls: &[i64], c: usize, witness_va: &MidVec<bool>, depth: usize,
     hint: Option<&[i64]>, out: &mut Hint, pre_rat: &mut Vec<i64>

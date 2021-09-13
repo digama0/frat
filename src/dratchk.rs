@@ -195,7 +195,7 @@ impl Pass2 {
 			let mut progress = false;
 			for a in self.active.iter().rev() {
 				if a.step.needed() {
-					if let Some(i) = process_local(&mut local_steps, &a) {
+					if let Some(i) = process_local(&mut local_steps, a) {
 						if i == 0 { break 'a }
 						progress = true
           }
@@ -203,7 +203,7 @@ impl Pass2 {
       }
 			if progress { continue }
 			for a in &self.active {
-				if let Some(i) = process_local(&mut local_steps, &a) {
+				if let Some(i) = process_local(&mut local_steps, a) {
 					if i == 0 { break 'a }
 					progress = true
         }

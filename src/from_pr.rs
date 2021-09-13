@@ -31,6 +31,7 @@ type M = Bin;
 
 type Context = HashMap<PermClause, Vec<u64>>;
 
+#[allow(clippy::too_many_arguments)]
 fn add_pr_step(
   PrStep {assignment, phase4_pfs, marked}: &mut PrStep,
   k: &mut u64,
@@ -50,10 +51,9 @@ fn add_pr_step(
     'opt: for (PermClause(clause), is) in ctx {
       let mut forced = 0;
       for &lit in clause {
-        if assignment[-lit] != Assign::Assigned {
-          if std::mem::replace(&mut forced, lit) != 0 {
-            continue 'opt
-          }
+        if assignment[-lit] != Assign::Assigned &&
+          std::mem::replace(&mut forced, lit) != 0 {
+          continue 'opt
         }
       }
       if assignment[forced] == Assign::Assigned {
