@@ -668,7 +668,7 @@ impl Context {
     }
   }
 
-  fn run_step<'a>(&mut self, ls: &[i64],
+  fn run_step<'a>(&mut self, ls: &[i64], pivot: Option<&i64>,
     in_wit: Option<&[i64]>, init: Option<&[i64]>,
     mut rats: Option<(&'a i64, &'a [i64])>,
     RatHint {hint: out, pre_rat, rat_set, witness, witness_va}: &mut RatHint
@@ -686,7 +686,7 @@ impl Context {
         // We assume that PR steps don't follow this path because any PR step with no touched
         // clauses can be expressed as a PR step with only one witness literal, which is a RAT step.
         init?.is_empty().then(|| ())?;
-        let pivot = *ls.first()?;
+        let pivot = *pivot?;
         if this.rat_set_lit == pivot {
           rat_set.is_empty().then(|| ())?
         } else {
@@ -716,7 +716,7 @@ impl Context {
         if !self.va.is_true(lit) { witness.push(lit) }
       }
     } else {
-      witness.push(*ls.first().expect("Unit propagation stuck, failed to prove empty clause"))
+      witness.push(*pivot.expect("Unit propagation stuck, failed to prove empty clause"))
     }
 
     let depth = self.va.tru_stack.len();
@@ -831,12 +831,12 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io:
           if let Some(Proof::LRAT(is)) = p {
             if let Some(start) = is.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
               let (init, rest) = is.split_at(start);
-              ctx.run_step(&c, wit, Some(init), rest.split_first(), hint)
+              ctx.run_step(&c, ls.first(), wit, Some(init), rest.split_first(), hint)
             } else {
-              ctx.run_step(&c, wit, Some(&is), None, hint)
+              ctx.run_step(&c, ls.first(), wit, Some(&is), None, hint)
             }
           } else {
-            ctx.run_step(&c, wit, None, None, hint)
+            ctx.run_step(&c, ls.first(), wit, None, None, hint)
           };
           let steps = &*hint.hint.steps;
           for &i in steps {
@@ -1131,9 +1131,9 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
           // eprintln!("{}: {:?} {:?}", k, ls, p);
           if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
             let (init, rest) = p.split_at(start);
-            ctx.run_step(ls, wit, Some(init), rest.split_first(), hint);
+            ctx.run_step(ls, ls.first(), wit, Some(init), rest.split_first(), hint);
           } else {
-            ctx.run_step(ls, wit, Some(&p), None, hint);
+            ctx.run_step(ls, ls.first(), wit, Some(&p), None, hint);
           }
         }).1;
         if add.is_empty() { return Ok(()) }
