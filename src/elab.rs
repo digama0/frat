@@ -636,7 +636,8 @@ impl Context {
     #[allow(clippy::never_loop)]
     'done: loop {
       assert!(!self.strict || hint.is_some(),
-        "Clause {} = {:?} not in LRAT trace", cl.name, cl.lits);
+        "step {}: {:?} not in LRAT trace for {:?}",
+        self.step, cl, ls);
       out.steps.push(-(cl.name as i64));
       if let Some(k) = self.va.unsat() {
         self.finalize_hint(k, out);
@@ -649,8 +650,8 @@ impl Context {
         }
       }
       assert!(self.build_step(&[], hint, out, |_| None),
-        "Unit propagation stuck, cannot resolve clause {:?} with {:?}",
-        ls, self.clauses[c]);
+        "Step {}: Unit propagation stuck, cannot resolve clause {:?} with {:?}",
+        self.step, ls, self.clauses[c]);
       break
     }
 
@@ -694,6 +695,7 @@ impl Context {
             (!cl.contains(&-pivot)).then(|| ())?
           }
         }
+        witness.push(pivot);
         Some(())
       })
     } else if let Some(k) = self.propagate_hint(ls, init.unwrap_or(&[])) {
@@ -916,8 +918,7 @@ fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut imp
     cnf.iter().map(|c| (PermClauseRef(c), {k += 1; k})).collect();
   let mut map: HashMap<u64, u64> = HashMap::default(); // Mapping between old and new IDs
   let mut bp = ElabStepIter(temp_it).peekable();
-  let origs = k;
-  let mut used_origs = vec![0u8; origs as usize];
+  let mut used_origs = vec![0u8; k as usize];
   let mut rats = vec![];
 
   while let Some(ElabStep::Orig(_, _)) = bp.peek() {

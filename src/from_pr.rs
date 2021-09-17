@@ -10,7 +10,7 @@ use crate::parser::{Mode, StepRef, Ascii, Bin, AddKind, DRATParser, DRATStep, de
 use crate::perm_clause::PermClause;
 use crate::serialize::{Serialize, ModeWrite, ModeWriter};
 
-#[repr(u8)] #[derive(Copy, Clone, PartialEq, Eq)]
+#[repr(u8)] #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Assign {
   No = 0,
   Minimized = 1,
@@ -66,7 +66,7 @@ fn add_pr_step(
   }
 
   // disabled because the original implementation does not make any sense
-  let mflag = false; // lemma.iter().all(|&lit| assignment[lit] != Assign::Assigned) && lemma.len() != 1;
+  let mflag = lemma.iter().all(|&lit| assignment[lit] != Assign::Assigned) && lemma.len() != 1;
 
   fn add(k: &mut u64, c: Vec<i64>, pf: Option<&[i64]>, w: &mut impl ModeWrite<M>) -> io::Result<(u64, Vec<i64>)> {
     *k += 1;
@@ -79,10 +79,10 @@ fn add_pr_step(
 
   // phase I: add shortened copies of clauses reduced, but not satisfied by omega
   let mut cleanup = vec![];
+  let mut mflag_phase1 = vec![];
   if mflag {
     for &lit in lemma {
-      // TODO: Why are we pushing def -> -C here?
-      cleanup.push(add(k, vec![-def, -lit], Some(&[]), w)?)
+      mflag_phase1.push(add(k, vec![-def, -lit], Some(&[]), w)?);
     }
   } else {
     'phase1: for (PermClause(clause), is) in ctx {
@@ -99,9 +99,10 @@ fn add_pr_step(
           move |&i| <_>::into_iter([-(i as i64), k])
         });
         for &lit in clause {
-          if assignment[-lit] == Assign::No { c.push(lit) }
-          else if assignment[-lit] == Assign::Assigned {
-            phase4_pfs[-lit].extend(it.clone());
+          match assignment[-lit] {
+            Assign::No => c.push(lit),
+            Assign::Assigned => phase4_pfs[-lit].extend(it.clone()),
+            _ => {}
           }
         }
         cleanup.push(add(k, c, Some(&[]), w)?)
@@ -148,7 +149,6 @@ fn add_pr_step(
 
   cleanup.push(phase3);
 
-
   // phase IV (a): add the implication x -> omega
   marked.clear();
   for &lit in witness {
@@ -161,10 +161,7 @@ fn add_pr_step(
   }
   let mut pf = vec![];
   if mflag {
-    for &lit in lemma {
-      // TODO: I don't see why these should be true
-      cleanup.push(add(k, vec![-def, -lit], None, w)?)
-    }
+    for c in mflag_phase1 { delete(c, w)? }
   } else {
     for (lit, cl, i) in stack.into_iter().rev() {
       for &lit2 in cl { if lit2 != lit { pf.push(marked[-lit2]) } }
@@ -178,8 +175,24 @@ fn add_pr_step(
   // phase IV (b): strengthen the involved clauses
   for (c, clause, old) in phase2 {
     let (&first, rest) = old.split_first().unwrap();
-    let lit = clause.iter().copied().find(|&lit| assignment[lit] != Assign::No).unwrap();
-    StepRef::add(first, clause, Some(&[c.0 as i64, marked[lit]])).write(w)?;
+    let i = clause.iter().position(|&lit| assignment[lit] != Assign::No).unwrap();
+    let lit = clause[i];
+    if marked[lit] == 0 {
+      // TODO: This dubious situation is reachable:
+      // - opt = mflag = true
+      // - lit refers to a literal in omega (the witness)
+      // - lit is not in omega' (i.e. assignment[lit] == Assign::Minimized)
+      // In this case `c` is not usable because it has been weakened,
+      // but it was used in the unit propagation proof, so we're stuck.
+      // Hope for the best and add it anyway?
+      // It seems to be RAT on the provided literal, and `c` shows up in the proof,
+      // but this is not a complete proof.
+      let mut clause = clause.clone();
+      clause.swap(0, i);
+      StepRef::add(first, &clause, Some(&[c.0 as i64])).write(w)?
+    } else {
+      StepRef::add(first, clause, Some(&[c.0 as i64, marked[lit]])).write(w)?
+    }
     for &i in rest {
       StepRef::add(i, clause, Some(&[first as _])).write(w)?
     }
