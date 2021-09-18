@@ -232,6 +232,7 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
   };
   for s in pr {
     match s {
+      DRATStep::Comment(s) => StepRef::Comment(&s).write(w)?,
       DRATStep::Add(add) => {
         if let Some(new) = add.0.iter().copied().max() {
           maxvar = maxvar.max(new)

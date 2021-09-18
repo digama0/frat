@@ -18,7 +18,7 @@ impl Iterator for VecBackParser {
   }
 }
 
-pub struct BackParser<M> {
+pub struct BackParser<M: Mode> {
   file: File,
   remaining: usize,
   pos: usize,
@@ -26,9 +26,10 @@ pub struct BackParser<M> {
   buffers: Vec<Box<[u8]>>,
   free: Vec<Box<[u8]>>,
   mode: M,
+  scan: M::BackScanState,
 }
 
-impl<M> BackParser<M> {
+impl<M: Mode> BackParser<M> {
   pub fn new(mode: M, mut file: File) -> io::Result<BackParser<M>> {
     let len = file.metadata()?.len() as usize;
     let pos = len.checked_sub(1).map_or(0, |l| l % BUFFER_SIZE + 1);
@@ -42,7 +43,8 @@ impl<M> BackParser<M> {
       last_read: pos,
       buffers: vec![buf],
       free: Vec::new(),
-      mode
+      scan: mode.new_back_scan(),
+      mode,
     })
   }
 
@@ -55,9 +57,7 @@ impl<M> BackParser<M> {
     self.remaining -= 1;
     Ok(Some(buf))
   }
-}
 
-impl<M: Mode> BackParser<M> {
   fn parse_segment_from(&mut self, b: usize, i: usize) -> Segment {
     if b == 0 {
       let res = self.mode.segment(&mut self.buffers[0][i..self.pos].iter().copied());
@@ -92,17 +92,13 @@ impl<M: Mode> Iterator for BackParser<M> {
       };
       if b == 0 {
         if self.pos != 0 {
-          for i in (0..self.pos-1).rev() {
-            if self.mode.back_scan(buf[i]) {
-              return Some(self.parse_segment_from(b, i + self.mode.offset()))
-            }
+          if let Some(i) = self.scan.back_scan(&buf[..self.pos-1]) {
+            return Some(self.parse_segment_from(b, i))
           }
         }
       } else {
-        for (i, &v) in buf.iter().enumerate().rev() {
-          if self.mode.back_scan(v) {
-            return Some(self.parse_segment_from(b, i + self.mode.offset()))
-          }
+        if let Some(i) = self.scan.back_scan(buf) {
+          return Some(self.parse_segment_from(b, i))
         }
       }
     }
@@ -118,6 +114,7 @@ impl<I: Iterator<Item=Segment>> Iterator for StepIter<I> {
   fn next(&mut self) -> Option<Step> {
     match self.0.next() {
       None => None,
+      Some(Segment::Comment(s)) => Some(Step::Comment(s)),
       Some(Segment::Orig(idx, vec)) => Some(Step::Orig(idx, vec)),
       Some(Segment::Add(idx, vec)) => Some(Step::Add(idx, AddStep(vec), None)),
       Some(Segment::Del(idx, vec)) => Some(Step::Del(idx, vec)),
@@ -141,6 +138,7 @@ impl<I: Iterator<Item=Segment>> Iterator for ElabStepIter<I> {
   fn next(&mut self) -> Option<ElabStep> {
     match self.0.next() {
       None => None,
+      Some(Segment::Comment(s)) => Some(ElabStep::Comment(s)),
       Some(Segment::Orig(idx, vec)) => Some(ElabStep::Orig(idx, vec)),
       Some(Segment::Add(_, _)) => panic!("add step has no proof"),
       Some(Segment::Del(idx, vec)) =>
@@ -151,7 +149,8 @@ impl<I: Iterator<Item=Segment>> Iterator for ElabStepIter<I> {
           Some(ElabStep::Add(idx, AddStep(vec), steps)),
         _ => panic!("'l' step not preceded by 'a' step")
       },
-      Some(_) => self.next(),
+      Some(Segment::Final(_, _)) => panic!("unexpected 'f' segment"),
+      Some(Segment::Todo(_)) => self.next(),
     }
   }
 }

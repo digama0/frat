@@ -1,13 +1,18 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 
+pub trait BackScan {
+  fn back_scan(&mut self, _: &[u8]) -> Option<usize>;
+}
+
 pub trait Mode: Default {
-  fn offset(&self) -> usize;
+  type BackScanState: BackScan;
   fn bin(&self) -> bool;
-  fn back_scan(&self, c: u8) -> bool;
+  fn new_back_scan(&self) -> Self::BackScanState;
   fn keyword(&self, it: &mut impl Iterator<Item=u8>) -> Option<u8> { it.next() }
   fn unum(&self, it: &mut impl Iterator<Item=u8>) -> Option<u64>;
   fn num(&self, it: &mut impl Iterator<Item=u8>) -> Option<i64>;
+  fn comment(&self, it: &mut impl Iterator<Item=u8>) -> String;
 
   fn uvec(&self, it: &mut impl Iterator<Item=u8>) -> Vec<u64> {
     let mut vec = Vec::new();
@@ -40,6 +45,7 @@ pub trait Mode: Default {
 
   fn segment(&self, it: &mut impl Iterator<Item=u8>) -> Segment {
     match self.keyword(it) {
+      Some(b'c') => Segment::Comment(self.comment(it)),
       Some(b'a') => Segment::Add(self.unum(it).unwrap(), self.ivec(it)),
       Some(b'd') => Segment::Del(self.unum(it).unwrap(), self.ivec(it)),
       Some(b'f') => Segment::Final(self.unum(it).unwrap(), self.ivec(it)),
@@ -55,6 +61,7 @@ pub trait Mode: Default {
 
 #[derive(Debug)]
 pub enum Segment {
+  Comment(String),
   Orig(u64, Vec<i64>),
   Add(u64, Vec<i64>),
   LProof(Vec<i64>),
@@ -67,10 +74,19 @@ pub enum Segment {
 #[derive(Default)] pub struct Bin;
 #[derive(Default)] pub struct Ascii;
 
+impl BackScan for Bin {
+  fn back_scan(&mut self, buf: &[u8]) -> Option<usize> {
+    for (i, &v) in buf.iter().enumerate().rev() {
+      if v == 0 { return Some(i + 1) }
+    }
+    None
+  }
+}
+
 impl Mode for Bin {
-  #[inline] fn offset(&self) -> usize {1}
+  type BackScanState = Bin;
   #[inline] fn bin(&self) -> bool {true}
-  #[inline] fn back_scan(&self, c: u8) -> bool { c == 0 }
+  fn new_back_scan(&self) -> Self::BackScanState { Bin }
 
   fn unum(&self, it: &mut impl Iterator<Item=u8>) -> Option<u64> {
     let mut res: u64 = 0;
@@ -91,7 +107,12 @@ impl Mode for Bin {
       if ulit & 1 != 0 { -((ulit >> 1) as i64) }
       else { (ulit >> 1) as i64 })
   }
+
+  fn comment(&self, it: &mut impl Iterator<Item=u8>) -> String {
+    String::from_utf8(it.take_while(|i| *i != 0).collect()).expect("non-utf8")
+  }
 }
+
 impl Ascii {
   fn spaces(it: &mut impl Iterator<Item=u8>) -> Option<u8> {
     loop { match it.next() {
@@ -114,13 +135,49 @@ impl Ascii {
     }
 		Some(val)
   }
+}
 
+#[derive(Debug, Default)]
+pub struct AsciiBackScan {
+  in_comment: bool,
+  comment_start: bool
+}
+
+impl AsciiBackScan {
+  #[cold] fn back_scan_comment(&mut self, buf: &[u8]) -> Option<usize> {
+    for (i, &v) in buf.iter().enumerate().rev() {
+      if v == b'\n' && self.comment_start {
+        self.in_comment = false;
+        self.comment_start = false;
+        return Some(i + 1)
+      }
+      self.comment_start = v == b'c';
+    }
+    None
+  }
+}
+
+impl BackScan for AsciiBackScan {
+  fn back_scan(&mut self, buf: &[u8]) -> Option<usize> {
+    if self.in_comment {
+      self.back_scan_comment(buf)
+    } else {
+      for (i, &v) in buf.iter().enumerate().rev() {
+        if v > b'9' { return Some(i) }
+        if v == b'.' {
+          self.in_comment = true;
+          return self.back_scan_comment(&buf[..i])
+        }
+      }
+      None
+    }
+  }
 }
 
 impl Mode for Ascii {
-  #[inline] fn offset(&self) -> usize {0}
+  type BackScanState = AsciiBackScan;
   #[inline] fn bin(&self) -> bool {false}
-  #[inline] fn back_scan(&self, c: u8) -> bool { c > b'9' }
+  fn new_back_scan(&self) -> Self::BackScanState { AsciiBackScan::default() }
   fn keyword(&self, it: &mut impl Iterator<Item=u8>) -> Option<u8> { Ascii::spaces(it) }
   fn unum(&self, it: &mut impl Iterator<Item=u8>) -> Option<u64> {
     Ascii::parse_num(Ascii::spaces(it), it)
@@ -130,14 +187,39 @@ impl Mode for Ascii {
     let val = Ascii::parse_num(peek, it)?;
     Some(if neg { -(val as i64) } else { val as i64 })
   }
+  fn comment(&self, it: &mut impl Iterator<Item=u8>) -> String {
+    let mut vec = match it.next() {
+      None | Some(b'\n') => return String::new(),
+      Some(b' ') => vec![],
+      Some(c) => vec![c],
+    };
+    loop {
+      match it.next() {
+        None | Some(b'\n') => break,
+        Some(b'.') => match it.next() {
+          None | Some(b'\n') => break,
+          Some(c) => { vec.push(b'.'); vec.push(c) }
+        },
+        Some(c) => vec.push(c)
+      }
+    }
+    String::from_utf8(vec).expect("non-utf8")
+  }
+}
+
+impl BackScan for Option<AsciiBackScan> {
+  fn back_scan(&mut self, buf: &[u8]) -> Option<usize> {
+    match self {
+      Some(this) => this.back_scan(buf),
+      None => Bin.back_scan(buf),
+    }
+  }
 }
 
 impl Mode for bool {
-  fn offset(&self) -> usize {if *self {Bin.offset()} else {Ascii.offset()}}
+  type BackScanState = Option<AsciiBackScan>;
   fn bin(&self) -> bool {*self}
-  fn back_scan(&self, c: u8) -> bool {
-    if *self {Bin.back_scan(c)} else {Ascii.back_scan(c)}
-  }
+  fn new_back_scan(&self) -> Self::BackScanState { self.then(AsciiBackScan::default) }
   fn keyword(&self, it: &mut impl Iterator<Item=u8>) -> Option<u8> {
     if *self {Bin.keyword(it)} else {Ascii.keyword(it)}
   }
@@ -146,6 +228,9 @@ impl Mode for bool {
   }
   fn num(&self, it: &mut impl Iterator<Item=u8>) -> Option<i64> {
     if *self {Bin.num(it)} else {Ascii.num(it)}
+  }
+  fn comment(&self, it: &mut impl Iterator<Item=u8>) -> String {
+    if *self {Bin.comment(it)} else {Ascii.comment(it)}
   }
 }
 
@@ -164,6 +249,7 @@ impl<M, I> LRATParser<M, I> {
 
 #[derive(Debug)]
 pub enum LRATStep {
+	Comment(String),
 	Add(AddStep, Vec<i64>),
 	Del(Vec<i64>)
 }
@@ -173,6 +259,7 @@ impl<M: Mode, I: Iterator<Item=u8>> Iterator for LRATParser<M, I> {
 	fn next(&mut self) -> Option<(u64, LRATStep)> {
 		Some((self.mode.unum(&mut self.it)?,
       match self.mode.keyword(&mut self.it)? {
+        b'c' => LRATStep::Comment(self.mode.comment(&mut self.it)),
         b'd' => LRATStep::Del(self.mode.ivec(&mut self.it)),
         k => LRATStep::Add(
           AddStep(self.mode.ivec(&mut Some(k).into_iter().chain(&mut self.it))),
@@ -190,6 +277,7 @@ impl<M, I> DRATParser<M, I> {
 
 #[derive(Debug)]
 pub enum DRATStep {
+	Comment(String),
 	Add(AddStep),
 	Del(Vec<i64>)
 }
@@ -199,12 +287,14 @@ impl<M: Mode, I: Iterator<Item=u8>> Iterator for DRATParser<M, I> {
 	fn next(&mut self) -> Option<DRATStep> {
     if self.mode.bin() {
       match self.mode.keyword(&mut self.it)? {
+        b'c' => Some(DRATStep::Comment(self.mode.comment(&mut self.it))),
         b'd' => Some(DRATStep::Del(self.mode.ivec(&mut self.it))),
         b'a' => Some(DRATStep::Add(AddStep(self.mode.ivec(&mut self.it)))),
         k => panic!("bad keyword {}", k as char)
       }
     } else {
       match self.mode.keyword(&mut self.it)? {
+        b'c' => Some(DRATStep::Comment(self.mode.comment(&mut self.it))),
         b'd' => Some(DRATStep::Del(self.mode.ivec(&mut self.it))),
         k => Some(DRATStep::Add(AddStep(
           self.mode.ivec(&mut Some(k).iter().cloned().chain(&mut self.it)))))
@@ -298,6 +388,7 @@ impl std::fmt::Debug for AddStep {
 
 #[derive(Debug)]
 pub enum Step {
+  Comment(String),
   Orig(u64, Vec<i64>),
   Add(u64, AddStep, Option<Proof>),
   Del(u64, Vec<i64>),
@@ -308,6 +399,7 @@ pub enum Step {
 
 #[derive(Debug, Copy, Clone)]
 pub enum StepRef<'a> {
+  Comment(&'a str),
   Orig(u64, &'a [i64]),
   Add(u64, AddStepRef<'a>, Option<ProofRef<'a>>),
   Del(u64, &'a [i64]),
@@ -319,6 +411,7 @@ pub enum StepRef<'a> {
 impl Step {
   pub fn as_ref(&self) -> StepRef<'_> {
     match *self {
+      Step::Comment(ref s) => StepRef::Comment(s),
       Step::Orig(i, ref v) => StepRef::Orig(i, v),
       Step::Add(i, ref v, ref p) => StepRef::Add(i, v.as_ref(), p.as_ref().map(Proof::as_ref)),
       Step::Del(i, ref v) => StepRef::Del(i, v),
@@ -337,6 +430,7 @@ impl<'a> StepRef<'a> {
 
 #[derive(Debug, Clone)]
 pub enum ElabStep {
+  Comment(String),
   Orig(u64, Vec<i64>),
   Add(u64, AddStep, Vec<i64>),
   Reloc(Vec<(u64, u64)>),
@@ -345,6 +439,7 @@ pub enum ElabStep {
 
 #[derive(Debug, Clone)]
 pub enum ElabStepRef<'a> {
+  Comment(&'a str),
   Orig(u64, &'a [i64]),
   Add(u64, AddStepRef<'a>, &'a [i64]),
   Reloc(&'a [(u64, u64)]),
@@ -354,6 +449,7 @@ pub enum ElabStepRef<'a> {
 impl ElabStep {
   pub fn as_ref(&self) -> ElabStepRef {
     match *self {
+      ElabStep::Comment(ref s) => ElabStepRef::Comment(s),
       ElabStep::Orig(i, ref v) => ElabStepRef::Orig(i, v),
       ElabStep::Add(i, ref v, ref p) => ElabStepRef::Add(i, v.as_ref(), p),
       ElabStep::Reloc(ref v) => ElabStepRef::Reloc(v),

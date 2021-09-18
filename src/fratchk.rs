@@ -22,6 +22,7 @@ pub fn check_proof(mode: impl Mode, proof: File) -> io::Result<()> {
   while let Some(s) = bp.next() {
     // println!("{:?}", s);
     match s {
+      Step::Comment(_) => {}
       Step::Orig(i, lits) => {
         orig += 1;
         match active.remove(&i) {

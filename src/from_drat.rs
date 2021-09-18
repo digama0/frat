@@ -21,6 +21,7 @@ fn from_drat(mode: impl Mode, cnf: Vec<Box<[i64]>>, drat: File, frat: File) -> i
     // eprintln!("{:?}", s);
 
     match s {
+      DRATStep::Comment(s) => StepRef::Comment(&s).write(w)?,
 
       DRATStep::Add(add) => {
         let (unsat, lemma) = add.parse_into(|add| {

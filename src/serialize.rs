@@ -29,17 +29,24 @@ impl Serialize<Ascii> for u8 {
   fn write(&self, w: &mut impl ModeWrite<Ascii>) -> io::Result<()> { write!(w, "{}", self) }
 }
 
-impl<'a, A: Serialize<Bin>> Serialize<Bin> for &'a [A] {
+impl<A: Serialize<Bin>> Serialize<Bin> for &[A] {
   fn write(&self, w: &mut impl ModeWrite<Bin>) -> io::Result<()> {
     for v in *self { v.write(w)? }
     0u8.write(w)
   }
 }
 
-impl<'a, A: Serialize<Ascii>> Serialize<Ascii> for &'a [A] {
+impl<A: Serialize<Ascii>> Serialize<Ascii> for &[A] {
   fn write(&self, w: &mut impl ModeWrite<Ascii>) -> io::Result<()> {
     for v in *self { v.write(w)?; write!(w, " ")? }
     write!(w, "0")
+  }
+}
+
+impl Serialize<Bin> for &str {
+  fn write(&self, w: &mut impl ModeWrite<Bin>) -> io::Result<()> {
+    write!(w, "{}", self)?;
+    0u8.write(w)
   }
 }
 
@@ -72,7 +79,7 @@ impl Serialize<Ascii> for i64 {
   fn write(&self, w: &mut impl ModeWrite<Ascii>) -> io::Result<()> { write!(w, "{}", self) }
 }
 
-impl<'a> Serialize<Bin> for AddStepRef<'a> {
+impl Serialize<Bin> for AddStepRef<'_> {
   fn write(&self, w: &mut impl ModeWrite<Bin>) -> io::Result<()> {
     match *self {
       AddStepRef::One(ls) => ls.iter().try_for_each(|v| v.write(w))?,
@@ -82,7 +89,7 @@ impl<'a> Serialize<Bin> for AddStepRef<'a> {
   }
 }
 
-impl<'a> Serialize<Ascii> for AddStepRef<'a> {
+impl Serialize<Ascii> for AddStepRef<'_> {
   fn write(&self, w: &mut impl ModeWrite<Ascii>) -> io::Result<()> {
     match *self {
       AddStepRef::One(ls) => for v in ls { v.write(w)?; write!(w, " ")? },
@@ -103,6 +110,7 @@ impl<M> Serialize<M> for AddStep where for<'a> &'a [i64]: Serialize<M> {
 impl<'a> Serialize<Bin> for StepRef<'a> {
   fn write(&self, w: &mut impl ModeWrite<Bin>) -> io::Result<()> {
     match *self {
+      StepRef::Comment(s) => (b'c', s).write(w),
       StepRef::Orig(idx, vec) => (b'o', (idx, vec)).write(w),
       StepRef::Add(idx, vec, None) => (b'a', (idx, vec)).write(w),
       StepRef::Add(idx, vec, Some(ProofRef::LRAT(steps))) =>
@@ -118,6 +126,8 @@ impl<'a> Serialize<Bin> for StepRef<'a> {
 impl<'a> Serialize<Ascii> for StepRef<'a> {
   fn write(&self, w: &mut impl ModeWrite<Ascii>) -> io::Result<()> {
     match *self {
+      StepRef::Comment(s) =>
+        s.split('\n').try_for_each(|s| writeln!(w, "c {}.", s)),
       StepRef::Orig(idx, vec) => {
         write!(w, "o {}  ", idx)?; vec.write(w)?; writeln!(w)
       }
@@ -158,6 +168,8 @@ impl<M> Serialize<M> for Step where for<'a> StepRef<'a>: Serialize<M> {
 impl<'a> Serialize<Bin> for ElabStepRef<'a> {
   fn write(&self, w: &mut impl ModeWrite<Bin>) -> io::Result<()> {
     match *self {
+      ElabStepRef::Comment(s) =>
+        s.split('\0').try_for_each(|s| (b'c', s).write(w)),
       ElabStepRef::Orig(idx, vec) => (b'o', (idx, vec)).write(w),
       ElabStepRef::Add(idx, vec, steps) =>
         ((b'a', (idx, vec)), (b'l', steps)).write(w),
@@ -170,6 +182,7 @@ impl<'a> Serialize<Bin> for ElabStepRef<'a> {
 impl<'a> Serialize<Ascii> for ElabStepRef<'a> {
   fn write(&self, w: &mut impl ModeWrite<Ascii>) -> io::Result<()> {
     match *self {
+      ElabStepRef::Comment(s) => StepRef::Comment(s).write(w),
       ElabStepRef::Orig(idx, vec) => StepRef::Orig(idx, vec).write(w),
       ElabStepRef::Add(idx, vec, steps) =>
         StepRef::Add(idx, vec, Some(ProofRef::LRAT(steps))).write(w),

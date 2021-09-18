@@ -811,6 +811,7 @@ fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io:
   for s in StepIter(BackParser::new(mode, frat)?) {
     // eprintln!("<- {:?}", s);
     match s {
+      Step::Comment(s) => ElabStep::Comment(s).write(w)?,
 
       Step::Orig(i, ls) => {
         ctx.step = i;
@@ -911,7 +912,12 @@ impl<'a, W: Write> DeleteLine<'a, W> {
   }
 }
 
-fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut impl Write) -> io::Result<()> {
+fn trim(
+  cnf: &[Box<[i64]>],
+  temp_it: impl Iterator<Item=Segment>,
+  comments: bool,
+  lrat: &mut impl Write,
+) -> io::Result<()> {
 
   let mut k = 0u64; // Counter for the last used ID
   let cnf: HashMap<PermClauseRef, u64> = // original CNF
@@ -948,6 +954,7 @@ fn trim(cnf: &[Box<[i64]>], temp_it: impl Iterator<Item=Segment>, lrat: &mut imp
     // eprintln!("-> {:?}", s);
 
     match s {
+      ElabStep::Comment(s) => if comments { writeln!(lrat, "{} c {}", k, s)? }
 
       ElabStep::Orig(_, _) =>
         panic!("Orig steps must come at the beginning of the temp file"),
@@ -1081,7 +1088,7 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
       };
       if let Some(lrat_file) = lrat_file {
         let mut lrat = BufWriter::new(File::create(&lrat_file)?);
-        trim(&cnf, temp_read, &mut lrat)?;
+        trim(&cnf, temp_read, matches!(args.next(), Some(ref s) if s == "-c"), &mut lrat)?;
         lrat.flush()?;
         if verify {
           println!("verifying...");
@@ -1092,11 +1099,11 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
       } else if verify {
         println!("verifying...");
         let mut lrat = vec![];
-        trim(&cnf, temp_read, &mut lrat)?;
+        trim(&cnf, temp_read, false, &mut lrat)?;
         check_lrat(Ascii, cnf, lrat.into_iter())?;
         println!("VERIFIED");
       } else {
-        trim(&cnf, temp_read, &mut io::sink())?;
+        trim(&cnf, temp_read, false, &mut io::sink())?;
       }
     }
     Ok(())
@@ -1122,6 +1129,7 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
     ctx.step = i;
     // eprintln!("{}: {:?}", i, s);
     match s {
+      LRATStep::Comment(_) => {}
 
       LRATStep::Add(add, p) => {
         assert!(i > k, "out-of-order LRAT proofs not supported");
@@ -1166,6 +1174,7 @@ fn refrat_pass(elab: File, w: &mut impl ModeWrite) -> io::Result<()> {
     // eprintln!("-> {:?}", s);
 
     match s {
+      ElabStep::Comment(s) => ElabStep::Comment(s).write(w)?,
 
       ElabStep::Orig(i, ls) => {
         StepRef::Orig(i, &ls).write(w)?;
