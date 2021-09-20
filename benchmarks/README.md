@@ -15,7 +15,7 @@ later benchmarks:
 For most purposes the latest version of FRAT-rs is probably the best choice, 
 but there may be cases where you need to use identical versions in order to 
 reproduce the benchmark results.  In particular, LRAT proofs of the CNF instance 
-[mod2c-3cage-unsat-10-3.sat05-2568.reshuffled-07-sc2007] (mod2c-3cage-unsat-10-3.sat05-2568.reshuffled-07-sc2007.cnf)
+[mod2c-3cage-unsat-10-3.sat05-2568.reshuffled-07-sc2007](mod2c-3cage-unsat-10-3.sat05-2568.reshuffled-07-sc2007.cnf)
 produced by _either_ DRAT or FRAT toolchain will cause SIGSEGV errors when checked by the standard 
 LRAT checker included in DRAT-trim. This error does not occur when using later versions of CaDiCaL.
 We believe that the error-causing LRAT proofs are still valid, as they can be verified by the LRAT
