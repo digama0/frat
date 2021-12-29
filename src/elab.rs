@@ -71,13 +71,13 @@ impl VAssign {
     if self.is_false(k) {Some(k)} else {None}
   }
 
-  #[inline] fn is_true(&self, l: i64) -> bool { self.tru_lits[l].assigned() }
-  #[inline] fn is_false(&self, l: i64) -> bool { self.is_true(-l) }
+  #[inline] #[track_caller] fn is_true(&self, l: i64) -> bool { self.tru_lits[l].assigned() }
+  #[inline] #[track_caller] fn is_false(&self, l: i64) -> bool { self.is_true(-l) }
 
   // Attempt to update the variable assignment and make l true under it.
   // If the update is impossible because l is already false under it, return false.
   // Otherwise, update and return true.
-  fn assign(&mut self, l: i64, reason: Reason) -> bool {
+  #[track_caller] fn assign(&mut self, l: i64, reason: Reason) -> bool {
     if self.is_true(l) { return true }
     self.reasons[l] = reason;
     self.tru_lits[l] = Assign::Yes;
@@ -234,11 +234,19 @@ impl Context {
     (sat, size)
   }
 
-  fn insert(&mut self, name: u64, marked: bool, mut lits: Box<[i64]>) {
-    for &lit in &*lits {
+  fn reserve(&mut self, lits: &[i64]) {
+    for &lit in lits {
       self.max_var = self.max_var.max(lit.abs())
     }
     self.va.reserve_to(self.max_var);
+  }
+
+  #[inline] fn insert(&mut self, name: u64, marked: bool, lits: Box<[i64]>) {
+    self.reserve(&lits);
+    self.insert_no_reserve(name, marked, lits);
+  }
+
+  fn insert_no_reserve(&mut self, name: u64, marked: bool, mut lits: Box<[i64]>) {
     let unit = self.sort_size(&mut lits) == (false, 1);
     let i = self.clauses.insert(Clause {marked, name, lits});
     assert!(self.names.insert(name, i).is_none(),
@@ -1137,6 +1145,7 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
         let add = add.parse_into(|kind| {
           let ls = kind.lemma();
           let wit = kind.witness();
+          ctx.reserve(ls);
           // eprintln!("{}: {:?} {:?}", k, ls, p);
           if let Some(start) = p.iter().position(|&i| i < 0).filter(|_| !ls.is_empty()) {
             let (init, rest) = p.split_at(start);
@@ -1146,7 +1155,7 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
           }
         }).1;
         if add.is_empty() { return Ok(()) }
-        ctx.insert(i, true, add.into());
+        ctx.insert_no_reserve(i, true, add.into());
       }
 
       LRATStep::Del(ls) => {

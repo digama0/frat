@@ -131,17 +131,27 @@ impl<T> MidVec<T> {
   }
 }
 
+#[cold] #[track_caller] fn panic_bounds_check(index: i64, size: i64) -> ! {
+  panic!("midvec index out of bounds: the size is {} but the index is {}", size, index)
+}
+
 impl<T> Index<i64> for MidVec<T> {
   type Output = T;
 
-  #[inline] fn index(&self, index: i64) -> &T {
-    self.get(index).expect("index out of bounds")
+  #[inline] #[track_caller] fn index(&self, index: i64) -> &T {
+    match self.get(index) {
+      Some(x) => x,
+      None => panic_bounds_check(index, self.size)
+    }
   }
 }
 
 impl<T> IndexMut<i64> for MidVec<T> {
-  #[inline] fn index_mut(&mut self, index: i64) -> &mut T {
-    self.get_mut(index).expect("index out of bounds")
+  #[inline] #[track_caller] fn index_mut(&mut self, index: i64) -> &mut T {
+    match self.get_mut(index) {
+      Some(x) => unsafe { std::mem::transmute(x) },
+      None => panic_bounds_check(index, self.size)
+    }
   }
 }
 

@@ -96,10 +96,8 @@ impl<M: Mode> Iterator for BackParser<M> {
             return Some(self.parse_segment_from(b, i))
           }
         }
-      } else {
-        if let Some(i) = self.scan.back_scan(buf) {
-          return Some(self.parse_segment_from(b, i))
-        }
+      } else if let Some(i) = self.scan.back_scan(buf) {
+        return Some(self.parse_segment_from(b, i))
       }
     }
     None
