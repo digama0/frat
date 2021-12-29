@@ -5,7 +5,7 @@ use std::mem;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 use slab::Slab;
 
-use crate::HashMap;
+use crate::{HashMap, HashSet};
 use super::midvec::MidVec;
 use super::dimacs::{parse_dimacs, parse_dimacs_map};
 use super::serialize::{Serialize, ModeWrite, ModeWriter};
@@ -151,6 +151,10 @@ impl Clause {
       "at {:?}: Clause {:?} added here will later be deleted as {:?}",
       step, self, lits)
   }
+
+  fn max_var(&self) -> i64 {
+    self.iter().map(|l| l.abs()).max().unwrap_or(0)
+  }
 }
 
 #[derive(Default)]
@@ -202,6 +206,7 @@ struct Context {
   units: HashMap<usize, i64>,
   watch: Watches,
   va: VAssign,
+  clauses_by_maxvar: Option<Vec<HashSet<usize>>>,
   rat_set_lit: i64,
   step: u64,
   strict: bool,
@@ -219,7 +224,26 @@ fn dedup_vec<T: PartialEq>(vec: &mut Vec<T>) {
   }
 }
 
+fn trim_cbm(cbm: &mut Vec<HashSet<usize>>) -> i64 {
+  while cbm.last().map_or(false, |set| set.is_empty()) { cbm.pop(); }
+  cbm.len() as i64
+}
+
 impl Context {
+  fn clauses_by_maxvar(&mut self) -> (&mut Vec<HashSet<usize>>, &mut Slab<Clause>) {
+    if self.clauses_by_maxvar.is_none() {
+      let mut cbm = vec![HashSet::default(); self.max_var as usize];
+      for (c, cl) in &self.clauses {
+        if let Some(maxvar) = cl.max_var().checked_sub(1) {
+          cbm[maxvar as usize].insert(c);
+        }
+      }
+      self.max_var = trim_cbm(&mut cbm);
+      self.clauses_by_maxvar = Some(cbm)
+    }
+    (self.clauses_by_maxvar.as_mut().unwrap(), &mut self.clauses)
+  }
+
   fn sort_size(&self, lits: &mut [i64]) -> (bool, usize) {
     let mut size = 0;
     let mut sat = false;
@@ -251,6 +275,12 @@ impl Context {
     let i = self.clauses.insert(Clause {marked, name, lits});
     assert!(self.names.insert(name, i).is_none(),
       "at {:?}: Clause {} to be inserted already exists", self.step, name);
+    if let Some(ref mut cbm) = self.clauses_by_maxvar {
+      if let Some(maxvar) = self.clauses[i].max_var().checked_sub(1) {
+        while maxvar as usize >= cbm.len() { cbm.push(Default::default()); }
+        cbm[maxvar as usize].insert(i);
+      }
+    }
     self.rat_set_lit = 0;
     self.watch.0[0].reserve_to(self.max_var);
     self.watch.0[1].reserve_to(self.max_var);
@@ -271,6 +301,16 @@ impl Context {
       || panic!("at {:?}: Clause {} to be removed does not exist", self.step, name));
 
     let cl = &self.clauses[i];
+    if let Some(ref mut cbm) = self.clauses_by_maxvar {
+      if let Some(maxvar) = cl.max_var().checked_sub(1) {
+        let set = &mut cbm[maxvar as usize];
+        set.remove(&i);
+        if maxvar == self.max_var && set.is_empty() {
+          cbm.pop();
+          self.max_var = trim_cbm(cbm);
+        }
+      }
+    }
     match **cl {
       [] => {}
       [l] => {
@@ -739,11 +779,22 @@ impl Context {
       witness_va.reserve_to(self.max_var);
       witness.iter().for_each(|&w| witness_va[w] = true);
       if let [pivot] = **witness {
-        for (c, cl) in &self.clauses {
-          if cl.contains(&-pivot) {
-            assert!(rat_set.insert(c, false).is_none())
+        let (cbm, clauses) = self.clauses_by_maxvar();
+        let var = pivot.abs() as usize - 1;
+        if var >= cbm.len() {
+          for set in &cbm[var..] {
+            for &c in set {
+              if clauses[c].contains(&-pivot) {
+                assert!(rat_set.insert(c, false).is_none())
+              }
+            }
           }
         }
+        // for (c, cl) in &self.clauses {
+        //   if cl.contains(&-pivot) {
+        //     assert!(rat_set.insert(c, false).is_none())
+        //   }
+        // }
         self.rat_set_lit = pivot
       } else {
         'next_clause: for (c, cl) in &self.clauses {

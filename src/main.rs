@@ -19,6 +19,7 @@ use std::hash::BuildHasherDefault;
 use std::{env, io};
 
 pub type HashMap<K, V> = std::collections::HashMap<K, V, BuildHasherDefault<DefaultHasher>>;
+pub type HashSet<K> = std::collections::HashSet<K, BuildHasherDefault<DefaultHasher>>;
 
 fn main() -> io::Result<()> {
   let mut args = env::args().skip(1);
