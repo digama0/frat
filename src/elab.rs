@@ -741,6 +741,17 @@ impl Context {
         let pivot = *pivot?;
         if this.rat_set_lit == pivot {
           rat_set.is_empty().then(|| ())?
+        } else if let Some(cbm) = &this.clauses_by_maxvar {
+          let var = pivot.abs() as usize - 1;
+          if var < cbm.len() {
+            for set in &cbm[var..] {
+              if !set.is_empty() {
+                for &c in set {
+                  (!this.clauses[c].contains(&-pivot)).then(|| ())?
+                }
+              }
+            }
+          }
         } else {
           for (_, cl) in &this.clauses {
             (!cl.contains(&-pivot)).then(|| ())?
