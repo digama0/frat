@@ -305,6 +305,9 @@ impl Context {
       if let Some(maxvar) = cl.max_var().checked_sub(1) {
         let set = &mut cbm[maxvar as usize];
         set.remove(&i);
+        if set.len() >= 6 && set.len() * 4 < set.capacity() {
+          set.shrink_to_fit()
+        }
         if maxvar == self.max_var && set.is_empty() {
           cbm.pop();
           self.max_var = trim_cbm(cbm);
