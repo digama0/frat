@@ -784,7 +784,7 @@ impl Context {
       if let [pivot] = **witness {
         let (cbm, clauses) = self.clauses_by_maxvar();
         let var = pivot.abs() as usize - 1;
-        if var >= cbm.len() {
+        if var < cbm.len() {
           for set in &cbm[var..] {
             if !set.is_empty() {
               for &c in set {
