@@ -786,9 +786,11 @@ impl Context {
         let var = pivot.abs() as usize - 1;
         if var >= cbm.len() {
           for set in &cbm[var..] {
-            for &c in set {
-              if clauses[c].contains(&-pivot) {
-                assert!(rat_set.insert(c, false).is_none())
+            if !set.is_empty() {
+              for &c in set {
+                if clauses[c].contains(&-pivot) {
+                  assert!(rat_set.insert(c, false).is_none())
+                }
               }
             }
           }
