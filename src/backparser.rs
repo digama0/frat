@@ -23,8 +23,8 @@ pub struct BackParser<M: Mode> {
   remaining: usize,
   pos: usize,
   last_read: usize,
-  buffers: Vec<Box<[u8]>>,
-  free: Vec<Box<[u8]>>,
+  buffers: Vec<Box<[u8; BUFFER_SIZE]>>,
+  free: Vec<Box<[u8; BUFFER_SIZE]>>,
   mode: M,
   scan: M::BackScanState,
 }
@@ -48,11 +48,11 @@ impl<M: Mode> BackParser<M> {
     })
   }
 
-  fn read_chunk(&mut self) -> io::Result<Option<Box<[u8]>>> {
+  fn read_chunk(&mut self) -> io::Result<Option<Box<[u8; BUFFER_SIZE]>>> {
     if self.remaining == 0 { return Ok(None) }
-    let mut buf: Box<[u8]> = self.free.pop().unwrap_or_else(|| Box::new([0; BUFFER_SIZE]));
+    let mut buf = self.free.pop().unwrap_or_else(|| Box::new([0; BUFFER_SIZE]));
     self.file.seek(SeekFrom::Current(-((BUFFER_SIZE + self.last_read) as i64)))?;
-    self.file.read_exact(&mut buf)?;
+    self.file.read_exact(&mut *buf)?;
     self.last_read = BUFFER_SIZE;
     self.remaining -= 1;
     Ok(Some(buf))
@@ -80,7 +80,7 @@ impl<M: Mode> Iterator for BackParser<M> {
 
   fn next(&mut self) -> Option<Segment> {
     for b in 0.. {
-      let buf: &[u8] = match self.buffers.get(b) {
+      let buf: &[u8; BUFFER_SIZE] = match self.buffers.get(b) {
         None => match self.read_chunk().expect("could not read from proof file") {
           None => {
             if b == 1 && self.pos == 0 { break }
