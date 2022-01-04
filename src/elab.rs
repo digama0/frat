@@ -998,7 +998,8 @@ fn trim(
   let cnf: HashMap<PermClauseRef, u64> = // original CNF
     cnf.iter().map(|c| (PermClauseRef(c), {k += 1; k})).collect();
   // Mapping between old and new IDs, where the bool is true if the old ID is a copy
-  let mut map: HashMap<u64, (u64, bool)> = HashMap::default();
+  let mut map: HashMap<u64, u64> = HashMap::default();
+  let mut copies: HashMap<u64, u32> = HashMap::default();
   let mut bp = ElabStepIter(temp_it).peekable();
   let mut used_origs = vec![0u8; k as usize];
   let mut rats = vec![];
@@ -1010,7 +1011,7 @@ fn trim(
         || panic!("Orig step {} refers to nonexistent clause {:?}", i, ls));
       let r = &mut used_origs[j as usize - 1];
       *r = r.saturating_add(1);
-      assert!(map.insert(i, (j, false)).is_none(), "Multiple orig steps with duplicate IDs");
+      assert!(map.insert(i, j).is_none(), "Multiple orig steps with duplicate IDs");
       // eprintln!("{} -> {}", i, j);
       if ls.is_empty() {
         writeln!(lrat, "{} 0 {} 0", k+1, j)?;
@@ -1041,12 +1042,14 @@ fn trim(
           _ => None,
         } {
           // A one-hint RUP step is a subsumed clause, so we can skip it
-          let cl = map.get(&cl).unwrap_or_else(||
-            panic!("step {}: proof step {:?} not found", i, cl)).0;
-          map.insert(i, (cl, true));
+          let cl = *map.get(&cl).unwrap_or_else(||
+            panic!("step {}: proof step {:?} not found", i, cl));
+          map.insert(i, cl);
+          // eprintln!("{} -> {} copy", i, cl);
+          *copies.entry(cl).or_default() += 1;
         } else {
           k += 1; // Get the next fresh ID
-          map.insert(i, (k, false)); // The ID of added clause is mapped to a fresh ID
+          map.insert(i, k); // The ID of added clause is mapped to a fresh ID
           // eprintln!("{} -> {}", i, k);
           let done = ls.is_empty();
 
@@ -1056,8 +1059,8 @@ fn trim(
           let mut last_neg = None;
           for (i, x) in is.iter_mut().enumerate() {
             let ux = x.abs() as u64;
-            let lit = map.get(&ux).unwrap_or_else(||
-              panic!("step {}: proof step {:?} not found", i, ux)).0 as i64;
+            let lit = *map.get(&ux).unwrap_or_else(||
+              panic!("step {}: proof step {:?} not found", i, ux)) as i64;
             *x = if *x < 0 {
               if let Some((lit, j)) = last_neg { rats.push((lit, j, i)) }
               last_neg = Some((lit, i));
@@ -1093,9 +1096,14 @@ fn trim(
       ElabStep::Del(i) => DeleteLine::with(lrat, k, |line| {
         let m = &mut map;
         let used_origs = &mut used_origs;
+        let copies = &mut copies;
         let mut delete = move |i| -> io::Result<()> {
-          let (j, copy) = m.remove(&i).unwrap();
-          if !copy && match used_origs.get_mut(j as usize - 1) {
+          let j = m.remove(&i).unwrap();
+          let last_copy = match copies.get_mut(&j) {
+            Some(val) if *val > 0 => { *val -= 1; false },
+            _ => true,
+          };
+          if last_copy && match used_origs.get_mut(j as usize - 1) {
             None => true,
             Some(&mut u8::MAX) => false,
             Some(refc) => { *refc -= 1; *refc == 0 }
