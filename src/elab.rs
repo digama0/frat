@@ -302,8 +302,10 @@ impl Context {
 
     let cl = &self.clauses[i];
     if let Some(ref mut cbm) = self.clauses_by_maxvar {
-      if let Some(maxvar) = cl.max_var().checked_sub(1) {
-        let set = &mut cbm[maxvar as usize];
+      debug_assert!(cbm.len() == self.max_var as usize);
+      let maxvar = cl.max_var();
+      if let Some(k) = maxvar.checked_sub(1) {
+        let set = &mut cbm[k as usize];
         set.remove(&i);
         if set.len() >= 6 && set.len() * 4 < set.capacity() {
           set.shrink_to_fit()
