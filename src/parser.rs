@@ -43,7 +43,7 @@ pub trait Mode: Default {
     }
   }
 
-  fn segment(&self, it: &mut impl Iterator<Item=u8>) -> Segment {
+  fn segment_mut(&self, ch: impl FnOnce() -> usize, it: &mut impl Iterator<Item=u8>) -> Segment {
     match self.keyword(it) {
       Some(b'c') => Segment::Comment(self.comment(it)),
       Some(b'a') => Segment::Add(self.unum(it).unwrap(), self.ivec(it)),
@@ -53,9 +53,19 @@ pub trait Mode: Default {
       Some(b'o') => Segment::Orig(self.unum(it).unwrap(), self.ivec(it)),
       Some(b'r') => Segment::Reloc(self.uvec2(it)),
       Some(b't') => Segment::Todo(self.unum(it).unwrap()),
-      Some(k) => panic!("bad step {:?}", k as char),
-      None => panic!("bad step None"),
+      Some(k) => panic!("parse error at char {}: bad step {:?}", ch(), k as char),
+      None => panic!("parse error at char {}: bad step None", ch()),
     }
+  }
+
+  fn check_empty(&self, mut it: impl Iterator<Item=u8>) -> bool {
+    it.next().is_none()
+  }
+
+  fn segment(&self, ch: impl Fn() -> usize, mut it: impl Iterator<Item=u8>) -> Segment {
+    let seg = self.segment_mut(&ch, &mut it);
+    assert!(self.check_empty(it), "parse error at char {}: segment has trailing characters", ch());
+    seg
   }
 }
 
@@ -204,6 +214,9 @@ impl Mode for Ascii {
       }
     }
     String::from_utf8(vec).expect("non-utf8")
+  }
+  fn check_empty(&self, mut it: impl Iterator<Item=u8>) -> bool {
+    it.all(|c| matches!(c, b' ' | b'\n'))
   }
 }
 

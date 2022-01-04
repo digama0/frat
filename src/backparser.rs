@@ -14,7 +14,7 @@ impl Iterator for VecBackParser {
     let (&n, most) = self.0.split_last()?;
     if n != 0 { panic!("expected 0 byte") }
     let i = most.iter().rposition(|&n| n == 0).map_or(0, |i| i + 1);
-    Some(Bin.segment(&mut self.0.drain(i..)))
+    Some(Bin.segment(|| i, self.0.drain(i..)))
   }
 }
 
@@ -59,13 +59,14 @@ impl<M: Mode> BackParser<M> {
   }
 
   fn parse_segment_from(&mut self, b: usize, i: usize) -> Segment {
+    let seg_start = || (self.remaining + (self.buffers.len() - (b + 1))) * BUFFER_SIZE + i;
     if b == 0 {
-      let res = self.mode.segment(&mut self.buffers[0][i..self.pos].iter().copied());
+      let res = self.mode.segment(seg_start, self.buffers[0][i..self.pos].iter().copied());
       self.pos = i;
       res
     } else {
-      let res = self.mode.segment(
-        &mut self.buffers[b][i..].iter()
+      let res = self.mode.segment(seg_start,
+        self.buffers[b][i..].iter()
           .chain(self.buffers[1..b].iter().rev().flat_map(|buf| buf.iter()))
           .chain(self.buffers[0][..self.pos].iter()).copied());
       self.pos = i;
