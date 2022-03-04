@@ -52,7 +52,11 @@ pub trait Mode: Default {
       Some(b'l') => Segment::LProof(self.ivec(it)),
       Some(b'o') => Segment::Orig(self.unum(it).unwrap(), self.ivec(it)),
       Some(b'r') => Segment::Reloc(self.uvec2(it)),
-      Some(b't') => Segment::Todo(self.unum(it).unwrap()),
+      Some(b't') => {
+        let n = self.unum(it).unwrap();
+        assert!(self.unum(it).unwrap() == 0, "parse error at todo, expected 1 number");
+        Segment::Todo(n)
+      }
       Some(k) => panic!("parse error at char {}: bad step {:?}", ch(), k as char),
       None => panic!("parse error at char {}: bad step None", ch()),
     }
