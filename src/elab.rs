@@ -244,7 +244,7 @@ impl Context {
     (self.clauses_by_maxvar.as_mut().unwrap(), &mut self.clauses)
   }
 
-  fn sort_size(&self, lits: &mut [i64]) -> (bool, usize) {
+  fn sort_unit(&self, lits: &mut [i64]) -> bool {
     let mut size = 0;
     let mut sat = false;
     for last in 0..lits.len() {
@@ -255,7 +255,7 @@ impl Context {
         size += 1;
       }
     }
-    (sat, size)
+    !sat && size <= 1
   }
 
   fn reserve(&mut self, lits: &[i64]) {
@@ -271,7 +271,7 @@ impl Context {
   }
 
   fn insert_no_reserve(&mut self, name: u64, marked: bool, mut lits: Box<[i64]>) {
-    let unit = self.sort_size(&mut lits) == (false, 1);
+    let unit = self.sort_unit(&mut lits);
     let i = self.clauses.insert(Clause {marked, name, lits});
     assert!(self.names.insert(name, i).is_none(),
       "at {:?}: Clause {} to be inserted already exists", self.step, name);
@@ -293,7 +293,7 @@ impl Context {
         self.watch.add(marked, l2, i);
       }
     }
-    if !self.strict && unit { self.va.add_unit(lits[0], i); }
+    if !self.strict && unit && !lits.is_empty() { self.va.add_unit(lits[0], i); }
   }
 
   fn remove(&mut self, name: u64) -> Clause {
