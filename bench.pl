@@ -1,7 +1,7 @@
 #!/usr/bin/env swipl
 
-% Prolog script for running benchmarks comparing FRAT-rs with DRAT-trim. 
-% The script calls the following programs, which should be available in your enviroment: 
+% Prolog script for running benchmarks comparing FRAT-rs with DRAT-trim.
+% The script calls the following programs, which should be available in your enviroment:
 %
 %   cadical : the CaDiCaL SAT solver (https://github.com/arminbiere/cadical)
 %   hackdical : the modified, FRAT-producing version of CaDiCaL (https://github.com/digama0/cadical)
@@ -15,54 +15,54 @@
 
 :- initialization(main, main).
 
-read_time(String, Time) :- 
+read_time(String, Time) :-
   string_concat("\tUser time (seconds): ", TimeString, String),
   number_string(Time, TimeString).
 
-read_missing(String, Missing) :- 
-  split_string(String, " ", "", [_, "missing", "proofs", Temp0]), 
-  string_concat("(", Temp1, Temp0), 
-  string_concat(MissingStr, "%)", Temp1), 
+read_missing(String, Missing) :-
+  split_string(String, " ", "", [_, "missing", "proofs", Temp0]),
+  string_concat("(", Temp1, Temp0),
+  string_concat(MissingStr, "%)", Temp1),
   number_string(Missing, MissingStr).
 
-read_peak_mem(String, PeakMem) :- 
-  string_concat("\tMaximum resident set size (kbytes): ", PeakMemStr, String), 
+read_peak_mem(String, PeakMem) :-
+  string_concat("\tMaximum resident set size (kbytes): ", PeakMemStr, String),
   number_string(PeakMem, PeakMemStr).
 
-read_avg_mem(String, AvgMem) :- 
-  string_concat("\tAverage resident set size (kbytes): ", AvgMemStr, String), 
+read_avg_mem(String, AvgMem) :-
+  string_concat("\tAverage resident set size (kbytes): ", AvgMemStr, String),
   number_string(AvgMem, AvgMemStr).
 
-read_item_core(Goal, Stream, Item) :- 
-  read_line_to_string(Stream, String), 
+read_item_core(Goal, Stream, Item) :-
+  read_line_to_string(Stream, String),
   (
-    String = end_of_file -> 
+    String = end_of_file ->
     (
       write("Read item fail, EOF\n"),
       false
-    ) ; 
+    ) ;
     (
-      call(Goal, String, Item) ; 
+      call(Goal, String, Item) ;
       read_item_core(Goal, Stream, Item)
     )
   ).
 
-read_item(Goal, File, Time) :- 
-  open(File, read, Stream), 
+read_item(Goal, File, Time) :-
+  open(File, read, Stream),
   read_item_core(Goal, Stream, Time).
 
-run(Strings) :- 
+run(Strings) :-
   atomic_list_concat(Strings, CMD),
   shell(CMD, _).
 
-run_and_time(Strings, TIME) :- 
+run_and_time(Strings, TIME) :-
   atomic_list_concat(Strings, CMD),
   atomic_list_concat(["time -v ", CMD, " 2> temp"], TIME_CMD),
   shell(TIME_CMD, _),
   read_item(read_time, "temp", TIME),
   delete_file("temp").
 
-run_and_measure(Strings, TIME, PEAK_MEM) :- 
+run_and_measure(Strings, TIME, PEAK_MEM) :-
   atomic_list_concat(Strings, CMD),
   format('Using command ~w\n', CMD),
   atomic_list_concat(["time -v ", CMD, " 2> temp"], TIME_CMD),
@@ -71,13 +71,13 @@ run_and_measure(Strings, TIME, PEAK_MEM) :-
   read_item(read_peak_mem, "temp", PEAK_MEM),
   delete_file("temp").
 
-print_and_log(Log, Format, Argument) :- 
-  format(Format, Argument), 
+print_and_log(Log, Format, Argument) :-
+  format(Format, Argument),
   format(Log, Format, Argument).
 
-main([CNF_FILE]) :- 
-  
-  open("bench_log", write, Log), 
+main([CNF_FILE]) :-
+
+  open("bench_log", write, Log),
 
   write("\n------- Running Hackdical -------\n\n"),
   run_and_time(["hackdical -q ", CNF_FILE, " test.frat --lrat=true"], DIMACS_FRAT_TIME),
@@ -86,10 +86,10 @@ main([CNF_FILE]) :-
   print_and_log(Log, 'FRAT file size : ~w bytes\n', FRAT_SIZE),
 
   write("\n------- Obtaining FRAT file statistics  -------\n\n"),
-  shell("frat-rs fratchk test.frat > frat_stats"),
+  shell("frat-rs stat test.frat > frat_stats"),
   read_item(read_missing, "frat_stats", MISSING),
   print_and_log(Log, 'Missing hints : ~w%\n', MISSING),
-  write("\nFrat statistics:\n\n"), 
+  write("\nFrat statistics:\n\n"),
   shell("cat frat_stats"),
   delete_file("frat_stats"),
 
@@ -99,10 +99,10 @@ main([CNF_FILE]) :-
   print_and_log(Log, 'FRAT-to-LRAT time : ~w seconds\n', FRAT_LRAT_TIME),
   print_and_log(Log, 'FRAT-to-LRAT peak memory usage : ~w kb\n', FRAT_LRAT_PEAK_MEM),
 
-  size_file("test.frat.temp", TEMP_SIZE), 
+  size_file("test.frat.temp", TEMP_SIZE),
   delete_file("test.frat.temp"), % test.lrat
   print_and_log(Log, 'TEMP file size : ~w bytes\n', TEMP_SIZE),
-  size_file("test.lrat", FRAT_LRAT_SIZE), 
+  size_file("test.lrat", FRAT_LRAT_SIZE),
   print_and_log(Log, 'LRAT-from-FRAT file size : ~w bytes\n', FRAT_LRAT_SIZE),
 
   write("\n------- Checking LRAT from FRAT (C) -------\n\n"),
@@ -110,13 +110,13 @@ main([CNF_FILE]) :-
   print_and_log(Log, 'LRAT-from-FRAT check time (C) : ~w seconds\n', FRAT_LRAT_CHK_C_TIME),
 
   write("\n------- Checking LRAT from FRAT (Rust) -------\n\n"),
-  run(["frat-rs lratchk ", CNF_FILE, " test.lrat 2>&1"]), 
+  run(["frat-rs lratchk ", CNF_FILE, " test.lrat 2>&1"]),
   delete_file("test.lrat"), % test.frat
 
   write("\n------- Running Cadical -------\n\n"),
   run_and_time(["cadical -q ", CNF_FILE, " test.drat"], DIMACS_DRAT_TIME),
   print_and_log(Log, 'DIMACS-to-DRAT time : ~w seconds\n', DIMACS_DRAT_TIME),
-  size_file("test.drat", DRAT_SIZE), 
+  size_file("test.drat", DRAT_SIZE),
   print_and_log(Log, 'DRAT file size : ~w bytes\n', DRAT_SIZE),
 
 
@@ -125,7 +125,7 @@ main([CNF_FILE]) :-
   delete_file("test.drat"), % test.lrat
   print_and_log(Log, 'DRAT-to-LRAT time : ~w seconds\n', DRAT_LRAT_TIME),
   print_and_log(Log, 'DRAT-to-LRAT peak memory usage : ~w kb\n', DRAT_LRAT_PEAK_MEM),
-  size_file("test.lrat", DRAT_LRAT_SIZE), 
+  size_file("test.lrat", DRAT_LRAT_SIZE),
   print_and_log(Log, 'LRAT-from-DRAT file size : ~w bytes\n', DRAT_LRAT_SIZE),
 
   write("\n------- Checking LRAT from DRAT (C) -------\n\n"),
@@ -134,7 +134,7 @@ main([CNF_FILE]) :-
 
   write("\n------- Checking LRAT from DRAT (Rust) -------\n\n"),
   run(["frat-rs lratchk ", CNF_FILE, " test.lrat 2>&1"]),
-  delete_file("test.lrat"), % 
+  delete_file("test.lrat"), %
 
   write("\n------- Bench Statistics -------\n\n"),
   format('DIMACS-to-FRAT time : ~w seconds\n', DIMACS_FRAT_TIME),
@@ -153,11 +153,11 @@ main([CNF_FILE]) :-
   format('LRAT-from-DRAT check time (C) : ~w seconds\n', DRAT_LRAT_CHK_C_TIME),
 
   atomic_list_concat(
-    [ DIMACS_FRAT_TIME, FRAT_SIZE, MISSING, FRAT_LRAT_TIME, 
+    [ DIMACS_FRAT_TIME, FRAT_SIZE, MISSING, FRAT_LRAT_TIME,
       FRAT_LRAT_PEAK_MEM, TEMP_SIZE, FRAT_LRAT_SIZE, FRAT_LRAT_CHK_C_TIME,
       DIMACS_DRAT_TIME, DRAT_SIZE, DRAT_LRAT_TIME, DRAT_LRAT_PEAK_MEM,
-      DRAT_LRAT_SIZE, DRAT_LRAT_CHK_C_TIME ], 
-    ", ", 
+      DRAT_LRAT_SIZE, DRAT_LRAT_CHK_C_TIME ],
+    ", ",
     CSV
   ),
   format('CSV : ~w', CSV).
