@@ -1,13 +1,13 @@
 # The FRAT format and FRAT-rs
 
-FRAT-rs is a toolchain for processing and transforming files in the [`FRAT format`](https://link.springer.com/chapter/10.1007/978-3-030-72016-2_4).
+FRAT-rs is a toolchain for processing and transforming files in the [FRAT format](https://link.springer.com/chapter/10.1007/978-3-030-72016-2_4).
 
 ## Usage
 
 FRAT-rs can be compiled using `make`. (It is written in Rust, so you will need to
 [get Rust](https://rustup.rs/) first to put `cargo` in your path.)
 
-* `frat-rs elab [--full] DIMACSFILE FRATFILE [-m[NUM]] [LRATFILE] [-v]`:
+* `frat-rs elab [--full] DIMACSFILE FRATFILE [-s|-ss] [-m[NUM]] [LRATFILE] [-v]`:
   Elaborates `FRATFILE`, the unsatisfiability proof of `DIMACSFILE`,
   and produces the corresponding `LRATFILE`.
 
@@ -15,6 +15,13 @@ FRAT-rs can be compiled using `make`. (It is written in Rust, so you will need t
     including steps that do not contribute to the final contradiction.
     (The default is to skip these steps, so we might generate a valid proof
     without ever noticing that the step that was skipped is not well formed.)
+
+  * If `-s` is specified, the FRAT file is checked in "strict mode", which means
+    that bogus proofs in `l` steps will be rejected. (The default behavior
+    is to instead fall back on no-hint mode if the hint is wrong.)
+
+  * If `-ss` is specified, the FRAT file is checked in "extra-strict mode",
+    in which `l` steps cannot be omitted.
 
   * If `-m` is specified, the intermediate file (between FRAT and LRAT) will
     be generated in memory instead of on disk, which might be faster.

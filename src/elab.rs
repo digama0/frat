@@ -209,7 +209,12 @@ struct Context {
   clauses_by_maxvar: Option<Vec<HashSet<usize>>>,
   rat_set_lit: i64,
   step: u64,
-  strict: bool,
+  /// True if invalid hints should be rejected.
+  validate_hints: bool,
+  /// True if invalid or missing hints should be rejected. (Implies `validate_hints`)
+  all_hints: bool,
+  /// True if in LRAT mode (implies `all_hints`)
+  lrat: bool,
   full: bool,
 }
 
@@ -293,7 +298,7 @@ impl Context {
         self.watch.add(marked, l2, i);
       }
     }
-    if !self.strict && unit && !lits.is_empty() { self.va.add_unit(lits[0], i); }
+    if !self.all_hints && unit && !lits.is_empty() { self.va.add_unit(lits[0], i); }
   }
 
   fn remove(&mut self, name: u64) -> Clause {
@@ -614,7 +619,7 @@ impl Context {
 
     if let Some(k) = self.va.unsat() { return Some(k) }
 
-    if !self.strict && !self.va.units_processed {
+    if !self.all_hints && !self.va.units_processed {
       for (&c, &l) in &self.units {
         if !self.va.is_true(l) { self.va.add_unit(l, c) }
       }
@@ -639,7 +644,7 @@ impl Context {
         let unsat = if let Some(i) = (1..cl.len()).find(|&i| !va.is_false(cl[i])) {
           let l = cl[0];
           if !va.is_false(l) || cl.lits[i+1..].iter().any(|&l| !va.is_false(l)) {
-            assert!(!self.strict, "at {:?}: clause {:?} is not unit", self.step, cl.name);
+            assert!(!self.validate_hints, "at {:?}: clause {:?} is not unit", self.step, cl.name);
             queue.push(c);
             continue
           }
@@ -668,8 +673,9 @@ impl Context {
         self.finalize_hint(k, out);
         return true
       } else if fallback(self).is_some() { return true }
-      if self.strict { return false }
+      if self.validate_hints { return false }
     }
+    assert!(!self.all_hints, "step {} for {:?}: proof missing", self.step, ls);
     if let Some(k) = self.propagate(ls) {
       self.finalize_hint(k, out);
       return true
@@ -688,9 +694,9 @@ impl Context {
     let mark_start = out.temp.len();
     #[allow(clippy::never_loop)]
     'done: loop {
-      assert!(!self.strict || hint.is_some(),
-        "step {}: {:?} not in LRAT trace for {:?}",
-        self.step, cl, ls);
+      assert!(!self.all_hints || hint.is_some(),
+        "step {} for {:?}: RAT resolvent with {:?} missing",
+        self.step, ls, cl);
       out.steps.push(-(cl.name as i64));
       if let Some(k) = self.va.unsat() {
         self.finalize_hint(k, out);
@@ -773,12 +779,17 @@ impl Context {
       return
     }
 
+    // A RAT step with no resolvents has no need for pre-RAT hint steps.
+    // So if there are such steps then we assume it was just a failed RUP proof
+    assert!(!self.validate_hints || rats.is_some() || init.map_or(true, |init| init.is_empty()),
+      "step {}: Unit propagation stuck, failed to prove empty clause", self.step);
+
     if let Some(w) = in_wit {
       for &lit in w {
         assert!(!self.va.is_false(lit) ||
             self.va.tru_stack.iter().rposition(|&l| l == -lit).unwrap() >= self.va.first_hyp,
-          "step failed, witness literal {} is complement of clause {:?}",
-          lit, self.clauses[self.va.reasons[-lit].clause().unwrap()]);
+          "step {} failed, witness literal {} is complement of clause {:?}",
+          self.step, lit, self.clauses[self.va.reasons[-lit].clause().unwrap()]);
         if !self.va.is_true(lit) { witness.push(lit) }
       }
     } else {
@@ -832,7 +843,7 @@ impl Context {
     let mut last = None;
     while let Some((&s, rest)) = rats {
       let c = -s as u64;
-      if self.strict {
+      if self.lrat {
         assert!(last.map_or(true, |l| l < c), "RAT steps must be sorted");
         last = Some(c);
       }
@@ -880,10 +891,14 @@ fn as_add_step<'a>(lits: &'a mut [i64], witness: &'a [i64]) -> AddStepRef<'a> {
   else { AddStepRef::Two(lits, witness) }
 }
 
-fn elab<M: Mode>(mode: M, full: bool, frat: File, w: &mut impl ModeWrite) -> io::Result<()> {
+fn elab<M: Mode>(
+  mode: M, full: bool, validate: bool, all_hints: bool, frat: File, w: &mut impl ModeWrite
+) -> io::Result<()> {
   let mut origs = Vec::new();
   let ctx = &mut Context::default();
   ctx.full = full;
+  ctx.validate_hints = validate;
+  ctx.all_hints = all_hints;
   let hint = &mut RatHint::default();
   for s in StepIter(BackParser::new(mode, frat)?) {
     // eprintln!("<- {:?}", s);
@@ -1137,6 +1152,13 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   let frat_path = args.next().expect("missing proof file");
 
   let mut frat = File::open(&frat_path)?;
+
+  let (validate, all_hints) = match args.peek().as_ref().map(|s| &***s) {
+    Some("-s") => { args.next(); (true, false) }
+    Some("-ss") => { args.next(); (true, true) }
+    _ => (false, false)
+  };
+
   let in_mem = match args.peek() {
     Some(arg) if arg.starts_with("-m") => {
       let n = if let Ok(n) = arg[2..].parse() { n }
@@ -1151,16 +1173,16 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   println!("elaborating...");
   if let Some(temp_sz) = in_mem {
     let mut temp = ModeWriter(Bin, Vec::with_capacity(temp_sz as usize));
-    if bin { elab(Bin, full, frat, &mut temp)? }
-    else { elab(Ascii, full, frat, &mut temp)? }
+    if bin { elab(Bin, full, validate, all_hints, frat, &mut temp)? }
+    else { elab(Ascii, full, validate, all_hints, frat, &mut temp)? }
 
     return finish(args, full, dimacs, VecBackParser(temp.1))
   } else {
     let temp_path = format!("{}.temp", frat_path);
     {
       let mut temp_write = ModeWriter(Bin, BufWriter::new(File::create(&temp_path)?));
-      if bin { elab(Bin, full, frat, &mut temp_write)? }
-      else { elab(Ascii, full, frat, &mut temp_write)? };
+      if bin { elab(Bin, full, validate, all_hints, frat, &mut temp_write)? }
+      else { elab(Ascii, full, validate, all_hints, frat, &mut temp_write)? };
       temp_write.flush()?;
     }
 
@@ -1210,7 +1232,9 @@ fn check_lrat(mode: impl Mode, cnf: Vec<Box<[i64]>>, lrat: impl Iterator<Item=u8
   let lp = LRATParser::from(mode, lrat);
   let mut k = 0;
   let ctx = &mut Context::default();
-  ctx.strict = true;
+  ctx.validate_hints = true;
+  ctx.all_hints = true;
+  ctx.lrat = true;
   ctx.full = true;
   let hint = &mut RatHint::default();
 
