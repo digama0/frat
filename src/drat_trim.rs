@@ -1619,6 +1619,7 @@ pub fn main(mut args: impl Iterator<Item=String>) -> io::Result<()> {
       }
     }
   }
+  #[allow(clippy::redundant_closure)] // rust-clippy#7812
   let input_file = input_file.unwrap_or_else(|| print_help());
   if proof_file.is_left() {
     println!("c reading proof from stdin")

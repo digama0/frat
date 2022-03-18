@@ -1,3 +1,5 @@
+#![allow(clippy::iter_with_drain)] // rust-clippy#8538
+
 use std::io::{self, Read, BufReader, Write, BufWriter};
 use std::fs::{File, read_to_string};
 use std::convert::TryInto;
@@ -444,7 +446,7 @@ impl Context {
 
     let Context {watch, clauses, va, ..} = self;
 
-    debug_assert!(!va.unsat().is_some());
+    debug_assert!(va.unsat().is_none());
 
     if !va.units_processed {
       debug_assert!(root);
@@ -1145,9 +1147,7 @@ fn trim(
 
 pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   let mut args = args.peekable();
-  let full = if args.peek().map_or(false, |s| s == "--full") {
-    args.next(); true
-  } else {false};
+  let full = matches!(args.peek(), Some(s) if s == "--full") && { args.next(); true };
   let dimacs = args.next().expect("missing input file");
   let frat_path = args.next().expect("missing proof file");
 
@@ -1169,6 +1169,24 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
     _ => None
   };
 
+  let (lrat_file, verify, comments) = match args.next() {
+    Some(ref s) if s == "-v" => (None, true, false),
+    Some(lrat_file) => {
+      let verify = matches!(args.peek(), Some(s) if s == "-v") && { args.next(); true };
+      let comments = matches!(args.peek(), Some(s) if s == "-c") && { args.next(); true };
+      (Some(lrat_file), verify, comments)
+    }
+    _ => (None, false, false),
+  };
+
+  if args.peek().is_some() {
+    eprintln!("\
+      Too many arguments to `frat-rs elab`. Expected:\n\n\
+      frat-rs elab [--full] DIMACSFILE FRATFILE [-s|-ss] [-m[NUM]] [LRATFILE] [-v] [-c]\n\n\
+      Note: options must appear in the specified order");
+    std::process::exit(2);
+  }
+
   let bin = detect_binary(&mut frat)?;
   println!("elaborating...");
   if let Some(temp_sz) = in_mem {
@@ -1176,7 +1194,7 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
     if bin { elab(Bin, full, validate, all_hints, frat, &mut temp)? }
     else { elab(Ascii, full, validate, all_hints, frat, &mut temp)? }
 
-    return finish(args, full, dimacs, VecBackParser(temp.1))
+    return finish(full, dimacs, lrat_file, verify, comments, VecBackParser(temp.1))
   } else {
     let temp_path = format!("{}.temp", frat_path);
     {
@@ -1187,11 +1205,11 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
     }
 
     let temp_read = BackParser::new(Bin, File::open(temp_path)?)?;
-    return finish(args, full, dimacs, temp_read)
+    return finish(full, dimacs, lrat_file, verify, comments, temp_read)
   }
 
-  fn finish(mut args: impl Iterator<Item=String>,
-    full: bool, dimacs: String,
+  fn finish(full: bool, dimacs: String,
+    lrat_file: Option<String>, verify: bool, comments: bool,
     temp_read: impl Iterator<Item=Segment>
   ) -> io::Result<()> {
     if !full {
@@ -1199,14 +1217,9 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
       let (_vars, cnf) = parse_dimacs_map(read_to_string(dimacs)?.bytes(),
         |mut c| {dedup_vec(&mut c); c.into()});
       println!("trimming...");
-      let (lrat_file, verify) = match args.next() {
-        Some(ref s) if s == "-v" => (None, true),
-        Some(lrat_file) => (Some(lrat_file), matches!(args.next(), Some(ref s) if s == "-v")),
-        _ => (None, false),
-      };
       if let Some(lrat_file) = lrat_file {
         let mut lrat = BufWriter::new(File::create(&lrat_file)?);
-        trim(&cnf, temp_read, matches!(args.next(), Some(ref s) if s == "-c"), &mut lrat)?;
+        trim(&cnf, temp_read, comments, &mut lrat)?;
         lrat.flush()?;
         if verify {
           println!("verifying...");

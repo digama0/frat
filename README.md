@@ -7,7 +7,7 @@ FRAT-rs is a toolchain for processing and transforming files in the [FRAT format
 FRAT-rs can be compiled using `make`. (It is written in Rust, so you will need to
 [get Rust](https://rustup.rs/) first to put `cargo` in your path.)
 
-* `frat-rs elab [--full] DIMACSFILE FRATFILE [-s|-ss] [-m[NUM]] [LRATFILE] [-v]`:
+* `frat-rs elab [--full] DIMACSFILE FRATFILE [-s|-ss] [-m[NUM]] [LRATFILE] [-v] [-c]`:
   Elaborates `FRATFILE`, the unsatisfiability proof of `DIMACSFILE`,
   and produces the corresponding `LRATFILE`.
 
@@ -34,6 +34,11 @@ FRAT-rs can be compiled using `make`. (It is written in Rust, so you will need t
   * If `-v` is specified, the LRAT file is passed directly to `lratchk`.
     Omitting `LRATFILE` and specifying `-v` is a way to verify FRAT files
     without otherwise generating output.
+
+  * If `-c` is specified (requires `LRATFILE`), comment lines from the original
+    FRAT file will be transmitted to the `LRATFILE`. This is a good way to align
+    important points in the proof with the output, but it is disabled by default
+    since some LRAT checkers don't support comments.
 
   This is the main subcommand you want to use, if you are a solver developer
   producing FRAT files.

@@ -33,7 +33,10 @@ fn main() -> io::Result<()> {
     "from-drat" => from_drat::main(args),
     "drat-trim" => drat_trim::main(args),
     "from-pr" => from_pr::main(args),
-    _ => panic!("{}", "incorrect subcommand, expected {\
-      elab, stat, dratchk, lratchk, refrat, strip-frat, from-drat, from-pr}")
+    _ => {
+      eprintln!("incorrect subcommand, expected {{\
+        elab, stat, dratchk, lratchk, refrat, strip-frat, from-drat, from-pr}}");
+      std::process::exit(2);
+    }
   }
 }
