@@ -2,7 +2,7 @@
 
 use std::io::{self, Read, BufReader, Write, BufWriter};
 use std::fs::{File, read_to_string};
-use std::convert::TryInto;
+use std::convert::{TryFrom, TryInto};
 use std::mem;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 use slab::Slab;
@@ -241,8 +241,8 @@ impl Context {
     if self.clauses_by_maxvar.is_none() {
       let mut cbm = vec![HashSet::default(); self.max_var as usize];
       for (c, cl) in &self.clauses {
-        if let Some(maxvar) = cl.max_var().checked_sub(1) {
-          cbm[maxvar as usize].insert(c);
+        if let Some(maxvar) = usize::try_from(cl.max_var()).unwrap().checked_sub(1) {
+          cbm[maxvar].insert(c);
         }
       }
       self.max_var = trim_cbm(&mut cbm);
@@ -283,9 +283,9 @@ impl Context {
     assert!(self.names.insert(name, i).is_none(),
       "at {:?}: Clause {} to be inserted already exists", self.step, name);
     if let Some(ref mut cbm) = self.clauses_by_maxvar {
-      if let Some(maxvar) = self.clauses[i].max_var().checked_sub(1) {
-        while maxvar as usize >= cbm.len() { cbm.push(Default::default()); }
-        cbm[maxvar as usize].insert(i);
+      if let Some(maxvar) = usize::try_from(self.clauses[i].max_var()).unwrap().checked_sub(1) {
+        while maxvar >= cbm.len() { cbm.push(Default::default()); }
+        cbm[maxvar].insert(i);
       }
     }
     self.rat_set_lit = 0;
@@ -311,8 +311,8 @@ impl Context {
     if let Some(ref mut cbm) = self.clauses_by_maxvar {
       debug_assert!(cbm.len() == self.max_var as usize);
       let maxvar = cl.max_var();
-      if let Some(k) = maxvar.checked_sub(1) {
-        let set = &mut cbm[k as usize];
+      if let Some(k) = usize::try_from(maxvar).unwrap().checked_sub(1) {
+        let set = &mut cbm[k];
         set.remove(&i);
         if set.len() >= 6 && set.len() * 4 < set.capacity() {
           set.shrink_to_fit()
