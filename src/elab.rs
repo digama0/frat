@@ -1194,7 +1194,7 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
     if bin { elab(Bin, full, validate, all_hints, frat, &mut temp)? }
     else { elab(Ascii, full, validate, all_hints, frat, &mut temp)? }
 
-    return finish(full, dimacs, lrat_file, verify, comments, VecBackParser(temp.1))
+    return finish(dimacs, lrat_file, verify, comments, VecBackParser(temp.1))
   } else {
     let temp_path = format!("{}.temp", frat_path);
     {
@@ -1205,37 +1205,35 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
     }
 
     let temp_read = BackParser::new(Bin, File::open(temp_path)?)?;
-    return finish(full, dimacs, lrat_file, verify, comments, temp_read)
+    return finish(dimacs, lrat_file, verify, comments, temp_read)
   }
 
-  fn finish(full: bool, dimacs: String,
+  fn finish(dimacs: String,
     lrat_file: Option<String>, verify: bool, comments: bool,
     temp_read: impl Iterator<Item=Segment>
   ) -> io::Result<()> {
-    if !full {
-      println!("parsing DIMACS...");
-      let (_vars, cnf) = parse_dimacs_map(read_to_string(dimacs)?.bytes(),
-        |mut c| {dedup_vec(&mut c); c.into()});
-      println!("trimming...");
-      if let Some(lrat_file) = lrat_file {
-        let mut lrat = BufWriter::new(File::create(&lrat_file)?);
-        trim(&cnf, temp_read, comments, &mut lrat)?;
-        lrat.flush()?;
-        if verify {
-          println!("verifying...");
-          let lrat = File::open(lrat_file)?;
-          check_lrat(Ascii, cnf, BufReader::new(lrat).bytes().map(Result::unwrap))?;
-          println!("VERIFIED");
-        }
-      } else if verify {
+    println!("parsing DIMACS...");
+    let (_vars, cnf) = parse_dimacs_map(read_to_string(dimacs)?.bytes(),
+      |mut c| {dedup_vec(&mut c); c.into()});
+    println!("trimming...");
+    if let Some(lrat_file) = lrat_file {
+      let mut lrat = BufWriter::new(File::create(&lrat_file)?);
+      trim(&cnf, temp_read, comments, &mut lrat)?;
+      lrat.flush()?;
+      if verify {
         println!("verifying...");
-        let mut lrat = vec![];
-        trim(&cnf, temp_read, false, &mut lrat)?;
-        check_lrat(Ascii, cnf, lrat.into_iter())?;
+        let lrat = File::open(lrat_file)?;
+        check_lrat(Ascii, cnf, BufReader::new(lrat).bytes().map(Result::unwrap))?;
         println!("VERIFIED");
-      } else {
-        trim(&cnf, temp_read, false, &mut io::sink())?;
       }
+    } else if verify {
+      println!("verifying...");
+      let mut lrat = vec![];
+      trim(&cnf, temp_read, false, &mut lrat)?;
+      check_lrat(Ascii, cnf, lrat.into_iter())?;
+      println!("VERIFIED");
+    } else {
+      trim(&cnf, temp_read, false, &mut io::sink())?;
     }
     Ok(())
   }
