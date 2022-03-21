@@ -410,6 +410,7 @@ impl Context {
 
   #[allow(unused)]
   fn self_test(&mut self) {
+    let mut error = false;
     'a: for (_, c) in &self.clauses {
       let mut lits = 0;
       for lit in c {
@@ -417,9 +418,8 @@ impl Context {
         else if !self.va.is_false(lit) { lits += 1 }
       }
       if lits <= 1 {
-        let msg = format!("at {}: Unit propagation missed unit {:?}", self.step, c);
-        let _ = self.log_status("unit_prop_error.log", &[]);
-        panic!("{}", msg);
+        eprintln!("at {}: Unit propagation missed unit {:?}", self.step, c);
+        error = true;
       }
     }
 
@@ -427,12 +427,15 @@ impl Context {
       if let [a, b, ..] = *cl.lits {
         for &l in &[a, b] {
           if !self.watch.watch_mut(cl.marked)[l].contains(&addr) {
-            let msg = format!("at {}: Watch {} not watching clause {}", self.step, l, cl.name);
-            let _ = self.log_status("unit_prop_error.log", &[]);
-            panic!("{}", msg);
+            eprintln!("at {}: Watch {} not watching clause {}", self.step, l, cl.name);
+            error = true;
           }
         }
       }
+    }
+    if error {
+      let _ = self.log_status("unit_prop_error.log", &[]);
+      panic!("self test failed");
     }
   }
 
@@ -471,7 +474,7 @@ impl Context {
 
         // We process marked and unmarked clauses in two separate passes.
         // If this clause is in the wrong class then skip.
-        if m != cl.marked {continue}
+        if m != cl.marked { continue }
 
         // Watched clauses have two literals at the front, that are being watched.
         if let [a, b, ..] = **cl {
@@ -542,7 +545,10 @@ impl Context {
 
     if let Some(k) = self.va.unsat() { return Some(k) }
 
-    if !self.va.units_processed || self.va.first_unprocessed < self.va.tru_stack.len() {
+    if !self.va.units_processed || self.va.first_unprocessed < self.va.first_hyp {
+      self.va.clear_hyps();
+      if let Some(k) = self.propagate_core() { return Some(k) }
+    } else if self.va.first_unprocessed < self.va.tru_stack.len() {
       if let Some(k) = self.propagate_core() { return Some(k) }
     }
 
@@ -967,7 +973,7 @@ fn elab<M: Mode>(
         dedup_vec(&mut ls);
         ctx.insert(i, false, ls.into());
         if full { ElabStep::Del(i).write(w)? }
-      },
+      }
 
       Step::Final(i, mut ls) => {
         ctx.step = i;
