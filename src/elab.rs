@@ -77,8 +77,7 @@ impl VAssign {
   #[inline] #[track_caller] fn is_false(&self, l: i64) -> bool { self.is_true(-l) }
 
   // Attempt to update the variable assignment and make l true under it.
-  // If the update is impossible because l is already false under it, return false.
-  // Otherwise, update and return true.
+  // If the assignment is made unsat because l is already false under it, return false.
   #[track_caller] fn assign(&mut self, l: i64, reason: Reason) -> bool {
     if self.is_true(l) { return true }
     self.reasons[l] = reason;
@@ -292,15 +291,15 @@ impl Context {
     self.watch.0[0].reserve_to(self.max_var);
     self.watch.0[1].reserve_to(self.max_var);
     let lits = &*self.clauses[i];
-    match *lits {
-      [] => {}
-      [l] => assert!(self.units.insert(i, l).is_none()),
-      [l1, l2, ..] => {
-        self.watch.add(marked, l1, i);
-        self.watch.add(marked, l2, i);
-      }
+    if let [l1, l2, ..] = *lits {
+      self.watch.add(marked, l1, i);
+      self.watch.add(marked, l2, i);
+    } else {
+      assert!(self.units.insert(i, lits.first().copied().unwrap_or(0)).is_none())
     }
-    if !self.all_hints && unit && !lits.is_empty() { self.va.add_unit(lits[0], i); }
+    if !self.all_hints && unit {
+      self.va.add_unit(lits.first().copied().unwrap_or(0), i);
+    }
   }
 
   fn remove(&mut self, name: u64) -> Clause {
@@ -323,19 +322,15 @@ impl Context {
         }
       }
     }
-    match **cl {
-      [] => {}
-      [l] => {
-        self.va.unassign(l);
-        self.units.remove(&i).expect("unit not found");
+    if let [l1, l2, ..] = **cl {
+      self.watch.del(cl.marked, l1, i);
+      self.watch.del(cl.marked, l2, i);
+      if self.va.reasons[l1] == Reason::new(i) {
+        self.va.unassign(l1)
       }
-      [l1, l2, ..] => {
-        self.watch.del(cl.marked, l1, i);
-        self.watch.del(cl.marked, l2, i);
-        if self.va.reasons[l1] == Reason::new(i) {
-          self.va.unassign(l1)
-        }
-      }
+    } else {
+      self.va.unassign(cl.first().copied().unwrap_or(0));
+      self.units.remove(&i).expect("unit not found");
     }
 
     self.clauses.remove(i)
@@ -378,8 +373,10 @@ impl Context {
         }
         if let Some(c) = self.va.reasons[lit].clause() {
           let step = self.clauses[c].name as i64;
-          for &l in &self.clauses[c].lits[1..] {
-            if !matches!(self.va.tru_lits[-l], Assign::Mark) { self.mark(-l) }
+          if let [_, lits @ ..] = &*self.clauses[c].lits {
+            for &l in lits {
+              if !matches!(self.va.tru_lits[-l], Assign::Mark) { self.mark(-l) }
+            }
           }
           self.hint.steps.push(step);
         }
@@ -533,8 +530,9 @@ impl Context {
     //   let _ = self.log_status("unit_prop_error.log", &[]);
     // }
 
+    // This only returns Some(_) if the empty clause is in the context
     // If there are no more literals to propagate, unit propagation has failed
-    None
+    va.unsat()
   }
 
   fn propagate(&mut self, c: &[i64]) -> Option<i64> {
@@ -587,10 +585,8 @@ impl Context {
         else if va.is_false(lit) { write!(log, "({}) ", lit)? }
         else { lits += 1; write!(log, "{} ", lit)? }
       }
-      if let [l] = **c {
-        if units.get(&addr) != Some(&l) {
-          write!(log, " (BUG: untracked unit clause)")?
-        }
+      if c.len() <= 1 && units.get(&addr) != Some(c.first().unwrap_or(&0)) {
+        write!(log, " (BUG: untracked unit clause)")?
       }
       writeln!(log, "{}", match (sat, lits) {
         (true, _) => " (satisfied)",
@@ -663,7 +659,11 @@ impl Context {
             watch.add(cl.marked, k, c);
           }
           false
-        } else { k = cl[0]; va.is_false(k) };
+        } else if let Some(&lit) = cl.first() {
+          k = lit; va.is_false(k)
+        } else {
+          k = 0; true
+        };
         assert!(va.assign(k, Reason::new(c)) != unsat);
         if unsat { return Some(k) }
         progress = true;
@@ -801,7 +801,8 @@ impl Context {
         if !self.va.is_true(lit) { witness.push(lit) }
       }
     } else {
-      witness.push(*pivot.expect("Unit propagation stuck, failed to prove empty clause"))
+      witness.push(*pivot.unwrap_or_else(||
+        panic!("step {}: Unit propagation stuck, failed to prove empty clause", self.step)))
     }
 
     let depth = self.va.tru_stack.len();
