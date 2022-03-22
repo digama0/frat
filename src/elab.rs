@@ -909,6 +909,8 @@ fn elab<M: Mode>(
   ctx.validate_hints = validate;
   ctx.all_hints = all_hints;
   let hint = &mut RatHint::default();
+  let mut finalizing = true;
+  let mut finalized_empty_clause = false;
   for s in StepIter(BackParser::new(mode, frat)?) {
     // eprintln!("<- {:?}", s);
     match s {
@@ -916,6 +918,7 @@ fn elab<M: Mode>(
 
       Step::Orig(i, ls) => {
         ctx.step = i;
+        finalizing = false;
         let c = ctx.remove(i);
         c.check_subsumed(&ls, ctx.step);
         if full || c.marked {  // If the original clause is marked
@@ -930,6 +933,7 @@ fn elab<M: Mode>(
         let kind = step.parse();
         let ls = kind.lemma();
         c.check_subsumed(ls, ctx.step);
+        finalizing = false;
         if full || c.marked {
           let wit = kind.witness();
           if let Some(Proof::LRAT(is)) = p {
@@ -971,6 +975,7 @@ fn elab<M: Mode>(
 
       Step::Del(i, mut ls) => {
         ctx.step = i;
+        finalizing = false;
         dedup_vec(&mut ls);
         ctx.insert(i, false, ls.into());
         if full { ElabStep::Del(i).write(w)? }
@@ -978,8 +983,11 @@ fn elab<M: Mode>(
 
       Step::Final(i, mut ls) => {
         ctx.step = i;
+        assert!(finalizing, "step {}: \
+          'f' steps should not be used before adding the empty clause; use 'd' steps instead", i);
         // Identical to the Del case, except that the clause should be marked if empty
         dedup_vec(&mut ls);
+        finalized_empty_clause |= ls.is_empty();
         ctx.insert(i, ls.is_empty(), ls.into());
       }
 
@@ -989,6 +997,7 @@ fn elab<M: Mode>(
 
   for (i, ls) in origs { ElabStep::Orig(i, ls.into()).write(w)? }
 
+  assert!(finalized_empty_clause, "empty clause never finalized");
   Ok(())
 }
 
