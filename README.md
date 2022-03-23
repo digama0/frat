@@ -46,7 +46,9 @@ FRAT-rs can be compiled using `make`. (It is written in Rust, so you will need t
 * `frat-rs lratchk DIMACSFILE LRATFILE`:
   Checks `LRATFILE` against the input problem `DIMACSFILE`.
 
-  This is essentially the same as [`lrat-check.c`](https://github.com/marijnheule/drat-trim/blob/master/lrat-check.c) but it is more robust (at the time of writing) and has
+  This is essentially the same as
+  [`lrat-check.c`](https://github.com/marijnheule/drat-trim/blob/master/lrat-check.c)
+  but it is more robust (at the time of writing) and has
   no known bugs. It is provided as a convenience for FRAT and LRAT file testing,
   but for actual high assurance scenarios you should use `elab` to generate an
   LRAT file and then use a formally verified LRAT checker like
@@ -62,6 +64,11 @@ FRAT-rs can be compiled using `make`. (It is written in Rust, so you will need t
   Processes `ELABFILE`, a temporary file produced by the first elaboration
   pass of frat-rs, and produces `FRATFILE`, a corresponding FRAT proof with
   100% annotations
+
+* `frat-rs to-cnf FRATFILE > DIMACSFILE`:
+  FRAT files contain a copy of the CNF inside them. This command constructs
+  a CNF file that `FRATFILE` could be a proof of, and writes it to stdout
+  (or pipes it to `DIMACSFILE` in this example)
 
 * `frat-rs from-drat DIMACSFILE DRATFILE FRATFILE`:
   Processes `DIMACSFILE` and `DRATFILE` to produce a corresponding `FRATFILE`

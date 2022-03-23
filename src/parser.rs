@@ -71,6 +71,8 @@ pub trait Mode: Default {
     assert!(self.check_empty(it), "parse error at char {}: segment has trailing characters", ch());
     seg
   }
+
+	fn drat_step(&mut self, it: &mut impl Iterator<Item=u8>) -> Option<DRATStep>;
 }
 
 #[derive(Debug)]
@@ -124,6 +126,15 @@ impl Mode for Bin {
 
   fn comment(&self, it: &mut impl Iterator<Item=u8>) -> String {
     String::from_utf8(it.take_while(|i| *i != 0).collect()).expect("non-utf8")
+  }
+
+	fn drat_step(&mut self, it: &mut impl Iterator<Item=u8>) -> Option<DRATStep> {
+    match self.keyword(it)? {
+      b'c' => Some(DRATStep::Comment(self.comment(it))),
+      b'd' => Some(DRATStep::Del(self.ivec(it))),
+      b'a' => Some(DRATStep::Add(AddStep(self.ivec(it)))),
+      k => panic!("bad keyword {}", k as char)
+    }
   }
 }
 
@@ -222,6 +233,15 @@ impl Mode for Ascii {
   fn check_empty(&self, mut it: impl Iterator<Item=u8>) -> bool {
     it.all(|c| matches!(c, b' ' | b'\n'))
   }
+
+	fn drat_step(&mut self, it: &mut impl Iterator<Item=u8>) -> Option<DRATStep> {
+    match self.keyword(it)? {
+      b'c' => Some(DRATStep::Comment(self.comment(it))),
+      b'd' => Some(DRATStep::Del(self.ivec(it))),
+      k => Some(DRATStep::Add(AddStep(
+        self.ivec(&mut Some(k).iter().cloned().chain(it)))))
+    }
+  }
 }
 
 impl BackScan for Option<AsciiBackScan> {
@@ -254,6 +274,27 @@ impl Mode for bool {
   }
   fn comment(&self, it: &mut impl Iterator<Item=u8>) -> String {
     if *self {Bin.comment(it)} else {Ascii.comment(it)}
+  }
+  fn uvec(&self, it: &mut impl Iterator<Item=u8>) -> Vec<u64> {
+    if *self {Bin.uvec(it)} else {Ascii.uvec(it)}
+  }
+  fn ivec(&self, it: &mut impl Iterator<Item=u8>) -> Vec<i64> {
+    if *self {Bin.ivec(it)} else {Ascii.ivec(it)}
+  }
+  fn uvec2(&self, it: &mut impl Iterator<Item=u8>) -> Vec<(u64, u64)> {
+    if *self {Bin.uvec2(it)} else {Ascii.uvec2(it)}
+  }
+  fn segment_mut(&self, ch: impl FnOnce() -> usize, it: &mut impl Iterator<Item=u8>) -> Segment {
+    if *self {Bin.segment_mut(ch, it)} else {Ascii.segment_mut(ch, it)}
+  }
+  fn check_empty(&self, it: impl Iterator<Item=u8>) -> bool {
+    if *self {Bin.check_empty(it)} else {Ascii.check_empty(it)}
+  }
+  fn segment(&self, ch: impl Fn() -> usize, it: impl Iterator<Item=u8>) -> Segment {
+    if *self {Bin.segment(ch, it)} else {Ascii.segment(ch, it)}
+  }
+  fn drat_step(&mut self, it: &mut impl Iterator<Item=u8>) -> Option<DRATStep> {
+    if *self {Bin.drat_step(it)} else {Ascii.drat_step(it)}
   }
 }
 
@@ -307,23 +348,7 @@ pub enum DRATStep {
 
 impl<M: Mode, I: Iterator<Item=u8>> Iterator for DRATParser<M, I> {
 	type Item = DRATStep;
-	fn next(&mut self) -> Option<DRATStep> {
-    if self.mode.bin() {
-      match self.mode.keyword(&mut self.it)? {
-        b'c' => Some(DRATStep::Comment(self.mode.comment(&mut self.it))),
-        b'd' => Some(DRATStep::Del(self.mode.ivec(&mut self.it))),
-        b'a' => Some(DRATStep::Add(AddStep(self.mode.ivec(&mut self.it)))),
-        k => panic!("bad keyword {}", k as char)
-      }
-    } else {
-      match self.mode.keyword(&mut self.it)? {
-        b'c' => Some(DRATStep::Comment(self.mode.comment(&mut self.it))),
-        b'd' => Some(DRATStep::Del(self.mode.ivec(&mut self.it))),
-        k => Some(DRATStep::Add(AddStep(
-          self.mode.ivec(&mut Some(k).iter().cloned().chain(&mut self.it)))))
-      }
-    }
-	}
+	fn next(&mut self) -> Option<DRATStep> { self.mode.drat_step(&mut self.it) }
 }
 
 #[derive(Debug)]
@@ -481,3 +506,64 @@ impl ElabStep {
   }
 }
 
+pub(crate) const BUFFER_SIZE: usize = 0x4000;
+
+struct FwdParserInner {
+  file: File,
+  buffer_start: usize,
+  buffer: [u8; BUFFER_SIZE],
+  pos: usize,
+  end: usize,
+}
+
+impl FwdParserInner {
+  fn refill(&mut self) -> io::Result<bool> {
+    if self.end == BUFFER_SIZE {
+      self.buffer_start += BUFFER_SIZE;
+      self.pos = 0
+    } else {
+      self.pos = self.end
+    }
+    let n = self.file.read(&mut self.buffer[self.pos..])?;
+    if n == 0 { return Ok(false) }
+    self.end = self.pos + n;
+    assert!(self.end <= BUFFER_SIZE);
+    Ok(true)
+  }
+}
+
+impl Iterator for FwdParserInner {
+  type Item = u8;
+  fn next(&mut self) -> Option<Self::Item> {
+    if self.pos < self.end || self.refill().expect("could not read from proof file") {
+      let c = unsafe { *self.buffer.get_unchecked(self.pos) };
+      self.pos += 1;
+      Some(c)
+    } else {
+      None
+    }
+  }
+}
+
+pub struct FwdParser<M: Mode> {
+  mode: M,
+  inner: FwdParserInner
+}
+
+impl<M: Mode> FwdParser<M> {
+  pub fn new(mode: M, file: File) -> Self {
+    let inner = FwdParserInner { file, buffer_start: 0, buffer: [0; BUFFER_SIZE], pos: 0, end: 0 };
+    Self { mode, inner }
+  }
+}
+impl<M: Mode> Iterator for FwdParser<M> {
+  type Item = Segment;
+
+  fn next(&mut self) -> Option<Segment> {
+    let inner = &mut self.inner;
+    self.mode.keyword(inner)?;
+    inner.pos -= 1;
+    let start = inner.buffer_start + inner.pos;
+    Some(self.mode.segment_mut(|| start, inner))
+  }
+}

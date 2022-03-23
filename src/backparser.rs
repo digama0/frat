@@ -3,8 +3,6 @@ use std::io::{self, Read, Seek, SeekFrom};
 use super::parser::*;
 pub use super::parser::{Proof, Step, ElabStep};
 
-const BUFFER_SIZE: usize = 0x4000;
-
 pub struct VecBackParser(pub Vec<u8>);
 
 impl Iterator for VecBackParser {

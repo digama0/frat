@@ -13,6 +13,7 @@ mod from_drat;
 mod strip_frat;
 mod drat_trim;
 mod from_pr;
+mod to_cnf;
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::BuildHasherDefault;
@@ -29,6 +30,7 @@ fn main() -> io::Result<()> {
     "dratchk" => dratchk::main(args),
     "lratchk" => elab::lratchk(args),
     "refrat" => elab::refrat(args),
+    "to-cnf" => to_cnf::main(args),
     "strip-frat" => strip_frat::main(args),
     "from-drat" => from_drat::main(args),
     "drat-trim" => drat_trim::main(args),
