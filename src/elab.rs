@@ -12,7 +12,7 @@ use super::midvec::MidVec;
 use super::dimacs::{parse_dimacs, parse_dimacs_map};
 use super::serialize::{Serialize, ModeWrite, ModeWriter};
 use super::parser::{detect_binary, Step, StepRef, ElabStep, ElabStepRef,
-  AddStep, AddStepRef, Segment, Proof, Mode, Ascii, Bin, LRATParser, LRATStep};
+  AddStep, AddStepRef, Segment, Proof, Mode, Ascii, Bin, DefaultMode, LRATParser, LRATStep};
 use super::backparser::{VecBackParser, BackParser, StepIter, ElabStepIter};
 use super::perm_clause::*;
 
@@ -1357,7 +1357,7 @@ fn refrat_pass(elab: File, w: &mut impl ModeWrite) -> io::Result<()> {
 pub fn refrat(mut args: impl Iterator<Item=String>) -> io::Result<()> {
   let elab_path = args.next().expect("missing elab file");
   let frat_path = args.next().expect("missing frat file");
-  let w = &mut ModeWriter(Bin, BufWriter::new(File::create(&frat_path)?));
+  let w = &mut ModeWriter(DefaultMode, BufWriter::new(File::create(&frat_path)?));
   refrat_pass(File::open(elab_path)?, w)?;
   w.flush()
 }

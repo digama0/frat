@@ -233,6 +233,12 @@ impl BackScan for Option<AsciiBackScan> {
   }
 }
 
+#[cfg(ascii)]
+pub use Ascii as DefaultMode;
+
+#[cfg(not(ascii))]
+pub use Bin as DefaultMode;
+
 impl Mode for bool {
   type BackScanState = Option<AsciiBackScan>;
   fn bin(&self) -> bool {*self}

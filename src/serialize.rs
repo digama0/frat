@@ -1,8 +1,9 @@
 use arrayvec::ArrayVec;
 use std::io::{self, Write};
-use super::parser::{Ascii, Bin, Step, StepRef, AddStep, AddStepRef, ElabStep, ElabStepRef, ProofRef};
+use super::parser::{Ascii, Bin, DefaultMode,
+  Step, StepRef, AddStep, AddStepRef, ElabStep, ElabStepRef, ProofRef};
 
-pub trait ModeWrite<M=Bin>: Write {}
+pub trait ModeWrite<M=DefaultMode>: Write {}
 
 pub struct ModeWriter<M, W>(pub M, pub W);
 
@@ -13,7 +14,7 @@ impl<M, W: Write> Write for ModeWriter<M, W> {
 }
 impl<M, W: Write> ModeWrite<M> for ModeWriter<M, W> {}
 
-pub trait Serialize<M=Bin> {
+pub trait Serialize<M=DefaultMode> {
   fn write(&self, w: &mut impl ModeWrite<M>) -> io::Result<()>;
 }
 

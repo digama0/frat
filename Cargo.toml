@@ -9,6 +9,9 @@ edition = "2018"
 [profile.release]
 debug = true
 
+[features]
+ascii = []
+
 [dependencies]
 byteorder = "1.4.2"
 arrayvec = "0.5.2"

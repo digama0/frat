@@ -6,7 +6,8 @@ use std::io::{self, Read, Write, Seek, SeekFrom, BufReader, BufWriter};
 use crate::HashMap;
 use crate::dimacs::parse_dimacs;
 use crate::midvec::MidVec;
-use crate::parser::{Mode, StepRef, Ascii, Bin, AddKind, DRATParser, DRATStep, detect_binary};
+use crate::parser::{Mode, StepRef, Ascii, Bin, AddKind, DRATParser, DRATStep,
+  detect_binary, DefaultMode};
 use crate::perm_clause::PermClause;
 use crate::serialize::{Serialize, ModeWrite, ModeWriter};
 
@@ -27,8 +28,6 @@ struct PrStep {
   marked: MidVec<i64>,
 }
 
-type M = Bin;
-
 type Context = HashMap<PermClause, Vec<u64>>;
 
 #[allow(clippy::too_many_arguments)]
@@ -36,7 +35,7 @@ fn add_pr_step(
   PrStep {assignment, phase4_pfs, marked}: &mut PrStep,
   k: &mut u64,
   ctx: &Context,
-  w: &mut impl ModeWrite<M>,
+  w: &mut impl ModeWrite,
   opt: bool,
   lemma: &[i64], witness: &[i64],
   def: i64,
@@ -68,12 +67,12 @@ fn add_pr_step(
   // disabled because the original implementation does not make any sense
   let mflag = lemma.iter().all(|&lit| assignment[lit] != Assign::Assigned) && lemma.len() != 1;
 
-  fn add(k: &mut u64, c: Vec<i64>, pf: Option<&[i64]>, w: &mut impl ModeWrite<M>) -> io::Result<(u64, Vec<i64>)> {
+  fn add(k: &mut u64, c: Vec<i64>, pf: Option<&[i64]>, w: &mut impl ModeWrite) -> io::Result<(u64, Vec<i64>)> {
     *k += 1;
     StepRef::add(*k, &c, pf).write(w)?;
     Ok((*k, c))
   }
-  fn delete((k, c): (u64, Vec<i64>), w: &mut impl ModeWrite<M>) -> io::Result<()> {
+  fn delete((k, c): (u64, Vec<i64>), w: &mut impl ModeWrite) -> io::Result<()> {
     StepRef::Del(k, &c).write(w)
   }
 
@@ -216,7 +215,7 @@ fn from_pr(mode: impl Mode, (vars, cnf): (usize, Vec<Box<[i64]>>),
 ) -> io::Result<()> {
   let pr = DRATParser::from(mode, BufReader::new(pr).bytes().map(Result::unwrap));
   let mut maxvar = vars.try_into().unwrap();
-  let w = &mut ModeWriter(M::default(), BufWriter::new(frat));
+  let w = &mut ModeWriter(DefaultMode::default(), BufWriter::new(frat));
   let mut k = 0;
   let mut ctx: Context = Context::default();
   for ls in cnf {
