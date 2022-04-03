@@ -253,10 +253,10 @@ impl BackScan for Option<AsciiBackScan> {
   }
 }
 
-#[cfg(ascii)]
+#[cfg(feature="ascii")]
 pub use Ascii as DefaultMode;
 
-#[cfg(not(ascii))]
+#[cfg(not(feature="ascii"))]
 pub use Bin as DefaultMode;
 
 impl Mode for bool {

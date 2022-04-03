@@ -18,8 +18,10 @@ pub trait Serialize<M=DefaultMode> {
   fn write(&self, w: &mut impl ModeWrite<M>) -> io::Result<()>;
 }
 
-impl<A: Serialize, B: Serialize> Serialize for (A, B) {
-  fn write(&self, w: &mut impl ModeWrite) -> io::Result<()> { self.0.write(w)?; self.1.write(w) }
+impl<A: Serialize<Bin>, B: Serialize<Bin>> Serialize<Bin> for (A, B) {
+  fn write(&self, w: &mut impl ModeWrite<Bin>) -> io::Result<()> {
+    self.0.write(w)?; self.1.write(w)
+  }
 }
 
 impl Serialize<Bin> for u8 {
