@@ -901,7 +901,7 @@ fn as_add_step<'a>(lits: &'a mut [i64], witness: &'a [i64]) -> AddStepRef<'a> {
 }
 
 fn elab<M: Mode>(
-  mode: M, full: bool, validate: bool, all_hints: bool, frat: File, w: &mut impl ModeWrite
+  mode: M, full: bool, validate: bool, all_hints: bool, frat: File, w: &mut impl ModeWrite<Bin>
 ) -> io::Result<()> {
   let mut origs = Vec::new();
   let ctx = &mut Context::default();
@@ -1206,7 +1206,7 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   let bin = detect_binary(&mut frat)?;
   println!("elaborating...");
   if let Some(temp_sz) = in_mem {
-    let mut temp = ModeWriter(DefaultMode, Vec::with_capacity(temp_sz as usize));
+    let mut temp = ModeWriter(Bin, Vec::with_capacity(temp_sz as usize));
     if bin { elab(Bin, full, validate, all_hints, frat, &mut temp)? }
     else { elab(Ascii, full, validate, all_hints, frat, &mut temp)? }
 
@@ -1214,7 +1214,7 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   } else {
     let temp_path = format!("{}.temp", frat_path);
     {
-      let mut temp_write = ModeWriter(DefaultMode, BufWriter::new(File::create(&temp_path)?));
+      let mut temp_write = ModeWriter(Bin, BufWriter::new(File::create(&temp_path)?));
       if bin { elab(Bin, full, validate, all_hints, frat, &mut temp_write)? }
       else { elab(Ascii, full, validate, all_hints, frat, &mut temp_write)? };
       temp_write.flush()?;
