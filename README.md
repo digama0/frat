@@ -7,7 +7,7 @@ FRAT-rs is a toolchain for processing and transforming files in the [FRAT format
 FRAT-rs can be compiled using `make`. (It is written in Rust, so you will need to
 [get Rust](https://rustup.rs/) first to put `cargo` in your path.)
 
-* `frat-rs elab [--full] DIMACSFILE FRATFILE [-s|-ss] [-m[NUM]] [LRATFILE] [-v] [-c]`:
+* `frat-rs elab FRATFILE [--full] [-s|-ss] [-m[NUM]] [DIMACSFILE [LRATFILE] [-v] [-c]]`:
   Elaborates `FRATFILE`, the unsatisfiability proof of `DIMACSFILE`,
   and produces the corresponding `LRATFILE`.
 
@@ -27,6 +27,11 @@ FRAT-rs can be compiled using `make`. (It is written in Rust, so you will need t
     be generated in memory instead of on disk, which might be faster.
     The optional `NUM` argument is a size hint for the initial allocation in
     bytes, which defaults to 5 times the size of the `FRATFILE`.
+
+  * If `DIMACSFILE` is specified, the resulting output will be checked against
+    the given CNF, otherwise only the first phase of elaboration will run,
+    producing a `FRATFILE.temp` file but no other output.
+    (This temporary file is useful as input to `refrat`.)
 
   * If `LRATFILE` is specified, the output will be placed in `LRATFILE`,
     otherwise the elaborator will run but no output will be produced.

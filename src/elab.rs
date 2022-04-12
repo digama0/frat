@@ -1163,17 +1163,17 @@ fn trim(
 
 pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   let mut args = args.peekable();
-  let full = matches!(args.peek(), Some(s) if s == "--full") && { args.next(); true };
-  let dimacs = args.next().expect("missing input file");
   let frat_path = args.next().expect("missing proof file");
 
-  let mut frat = File::open(&frat_path)?;
+  let full = matches!(args.peek(), Some(s) if s == "--full") && { args.next(); true };
 
   let (validate, all_hints) = match args.peek().as_ref().map(|s| &***s) {
     Some("-s") => { args.next(); (true, false) }
     Some("-ss") => { args.next(); (true, true) }
     _ => (false, false)
   };
+
+  let mut frat = File::open(&frat_path)?;
 
   let in_mem = match args.peek() {
     Some(arg) if arg.starts_with("-m") => {
@@ -1185,6 +1185,7 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
     _ => None
   };
 
+  let dimacs = args.next();
   let (lrat_file, verify, comments) = match args.next() {
     Some(ref s) if s == "-v" => (None, true, false),
     Some(lrat_file) => {
@@ -1198,7 +1199,7 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
   if args.peek().is_some() {
     eprintln!("\
       Too many arguments to `frat-rs elab`. Expected:\n\n\
-      frat-rs elab [--full] DIMACSFILE FRATFILE [-s|-ss] [-m[NUM]] [LRATFILE] [-v] [-c]\n\n\
+      frat-rs elab FRATFILE [--full] [-s|-ss] [-m[NUM]] [DIMACSFILE [LRATFILE] [-v] [-c]]\n\n\
       Note: options must appear in the specified order");
     std::process::exit(2);
   }
@@ -1224,13 +1225,16 @@ pub fn main(args: impl Iterator<Item=String>) -> io::Result<()> {
     return finish(dimacs, lrat_file, verify, comments, temp_read)
   }
 
-  fn finish(dimacs: String,
+  fn finish(dimacs: Option<String>,
     lrat_file: Option<String>, verify: bool, comments: bool,
     temp_read: impl Iterator<Item=Segment>
   ) -> io::Result<()> {
+    let dimacs = match dimacs {
+      Some(dimacs) => read_to_string(dimacs)?,
+      None => return Ok(())
+    };
     println!("parsing DIMACS...");
-    let (_vars, cnf) = parse_dimacs_map(read_to_string(dimacs)?.bytes(),
-      |mut c| {dedup_vec(&mut c); c.into()});
+    let (_vars, cnf) = parse_dimacs_map(dimacs.bytes(), |mut c| {dedup_vec(&mut c); c.into()});
     println!("trimming...");
     if let Some(lrat_file) = lrat_file {
       let mut lrat = BufWriter::new(File::create(&lrat_file)?);

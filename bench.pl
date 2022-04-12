@@ -94,7 +94,7 @@ main([CNF_FILE]) :-
   delete_file("frat_stats"),
 
   write("\n------- Elaborating FRAT to LRAT -------\n\n"),
-  run_and_measure(["frat-rs elab ", CNF_FILE, " test.frat test.lrat"], FRAT_LRAT_TIME, FRAT_LRAT_PEAK_MEM), % test.frat, test.frat.temp, test.lrat
+  run_and_measure(["frat-rs elab test.frat ", CNF_FILE, " test.lrat"], FRAT_LRAT_TIME, FRAT_LRAT_PEAK_MEM), % test.frat, test.frat.temp, test.lrat
   delete_file("test.frat"), % test.frat.temp, test.lrat
   print_and_log(Log, 'FRAT-to-LRAT time : ~w seconds\n', FRAT_LRAT_TIME),
   print_and_log(Log, 'FRAT-to-LRAT peak memory usage : ~w kb\n', FRAT_LRAT_PEAK_MEM),
