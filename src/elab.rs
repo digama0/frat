@@ -909,7 +909,7 @@ fn elab<M: Mode>(
   ctx.validate_hints = validate;
   ctx.all_hints = all_hints;
   let hint = &mut RatHint::default();
-  let mut finalizing = true;
+  let mut last_non_finalize = None;
   let mut finalized_empty_clause = false;
   for s in StepIter(BackParser::new(mode, frat)?) {
     // eprintln!("<- {:?}", s);
@@ -918,7 +918,7 @@ fn elab<M: Mode>(
 
       Step::Orig(i, ls) => {
         ctx.step = i;
-        finalizing = false;
+        last_non_finalize = Some(i);
         let c = ctx.remove(i);
         c.check_subsumed(&ls, ctx.step);
         if full || c.marked {  // If the original clause is marked
@@ -933,7 +933,7 @@ fn elab<M: Mode>(
         let kind = step.parse();
         let ls = kind.lemma();
         c.check_subsumed(ls, ctx.step);
-        finalizing = false;
+        last_non_finalize = Some(i);
         if full || c.marked {
           let wit = kind.witness();
           if let Some(Proof::LRAT(is)) = p {
@@ -948,7 +948,7 @@ fn elab<M: Mode>(
           };
           let steps = &*hint.hint.steps;
           for &i in steps {
-            let i = i.abs() as u64;
+            let i = i.unsigned_abs();
             let c = ctx.get(i);
             let cl = &mut ctx.clauses[c];
             // let v = cs.get_mut(&i).unwrap();
@@ -975,7 +975,7 @@ fn elab<M: Mode>(
 
       Step::Del(i, mut ls) => {
         ctx.step = i;
-        finalizing = false;
+        last_non_finalize = Some(i);
         dedup_vec(&mut ls);
         ctx.insert(i, false, ls.into());
         if full { ElabStep::Del(i).write(w)? }
@@ -983,8 +983,10 @@ fn elab<M: Mode>(
 
       Step::Final(i, mut ls) => {
         ctx.step = i;
-        assert!(finalizing, "step {}: \
-          'f' steps should not be used before adding the empty clause; use 'd' steps instead", i);
+        if let Some(j) = last_non_finalize {
+          panic!("step {}: \
+            'f' steps should only appear at the end of the proof (step {} appears later).", i, j);
+        }
         // Identical to the Del case, except that the clause should be marked if empty
         dedup_vec(&mut ls);
         finalized_empty_clause |= ls.is_empty();
