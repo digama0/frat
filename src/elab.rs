@@ -758,7 +758,7 @@ impl Context {
         if this.rat_set_lit == pivot {
           rat_set.is_empty().then(|| ())?
         } else if let Some(cbm) = &this.clauses_by_maxvar {
-          let var = pivot.abs() as usize - 1;
+          let var = pivot.unsigned_abs() as usize - 1;
           if var < cbm.len() {
             for set in &cbm[var..] {
               if !set.is_empty() {
@@ -816,7 +816,7 @@ impl Context {
       witness.iter().for_each(|&w| witness_va[w] = true);
       if let [pivot] = **witness {
         let (cbm, clauses) = self.clauses_by_maxvar();
-        let var = pivot.abs() as usize - 1;
+        let var = pivot.unsigned_abs() as usize - 1;
         if var < cbm.len() {
           for set in &cbm[var..] {
             if !set.is_empty() {
@@ -1093,7 +1093,7 @@ fn trim(
           write!(lrat, " 0")?;
           let mut last_neg = None;
           for (i, x) in is.iter_mut().enumerate() {
-            let ux = x.abs() as u64;
+            let ux = x.unsigned_abs();
             let lit = *map.get(&ux).unwrap_or_else(||
               panic!("step {}: proof step {:?} not found", i, ux)) as i64;
             *x = if *x < 0 {

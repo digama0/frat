@@ -52,7 +52,7 @@ pub fn check_proof(mode: impl Mode, proof: File) -> io::Result<()> {
           if need {
             if let Some(Proof::LRAT(steps)) = p {
               for s in steps {
-                let needed = &mut active.get_mut(&(s.abs() as u64)).expect("bad LRAT proof").0;
+                let needed = &mut active.get_mut(&s.unsigned_abs()).expect("bad LRAT proof").0;
                 if !*needed {
                   // unimplemented!();
                   *needed = true;

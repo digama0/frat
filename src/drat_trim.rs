@@ -340,7 +340,7 @@ fn shrink_vec<T>(vec: &mut Vec<T>, size: usize) {
 }
 
 fn write_lit(f: &mut impl Write, lit: i64) -> io::Result<()> {
-  let mut l = (lit.abs() as u64) << 1;
+  let mut l = lit.unsigned_abs() << 1;
   if lit < 0 { l += 1 }
   loop {
     f.write_all(&[if l <= 127 {l} else {128 + (l & 127)} as u8])?;
