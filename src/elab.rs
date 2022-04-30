@@ -98,7 +98,8 @@ impl VAssign {
 
   fn add_unit(&mut self, l: i64, cl: usize) {
     debug_assert!(self.first_hyp == self.tru_stack.len(), "uncleared hypotheses");
-    if self.unsat().is_some() || self.is_true(l) {return}
+    debug_assert!(self.unsat().is_none(), "check unsat first");
+    if self.is_true(l) {return}
     self.reasons[l] = Reason::new(cl);
     self.tru_lits[l] = Assign::Yes;
     self.tru_stack.push(l);
@@ -297,7 +298,7 @@ impl Context {
     } else {
       assert!(self.units.insert(i, lits.first().copied().unwrap_or(0)).is_none())
     }
-    if !self.all_hints && unit {
+    if !self.all_hints && unit && self.va.unsat().is_none() {
       self.va.add_unit(lits.first().copied().unwrap_or(0), i);
     }
   }
@@ -451,7 +452,8 @@ impl Context {
     if !va.units_processed {
       debug_assert!(root);
       for (&c, &l) in &self.units {
-        if !va.is_true(l) { va.add_unit(l, c) }
+        va.add_unit(l, c);
+        if let Some(k) = va.unsat() { return Some(k) }
       }
       va.units_processed = true;
     }
@@ -544,7 +546,10 @@ impl Context {
     if let Some(k) = self.va.unsat() { return Some(k) }
 
     if !self.va.units_processed || self.va.first_unprocessed < self.va.first_hyp {
-      self.va.clear_hyps();
+      if self.va.first_hyp < self.va.tru_stack.len() {
+        self.va.clear_hyps();
+        if let Some(k) = self.va.unsat() { return Some(k) }
+      }
       if let Some(k) = self.propagate_core() { return Some(k) }
     } else if self.va.first_unprocessed < self.va.tru_stack.len() {
       if let Some(k) = self.propagate_core() { return Some(k) }
@@ -597,6 +602,7 @@ impl Context {
     }
     writeln!(log, "\nObtained unit literals{}:",
       if va.units_processed {""} else {" (not all units have not been populated)"})?;
+    let mut unsat = false;
     for (i, &lit) in va.tru_stack.iter().enumerate() {
       assert!(va.is_true(lit));
       writeln!(log, "[{}] {}: {:?}{}{}{}", i, lit,
@@ -608,6 +614,13 @@ impl Context {
           Assign::Yes => "",
           Assign::Mark => " (marked)"
         })?;
+      unsat |= va.tru_lits[lit].assigned() && va.tru_lits[-lit].assigned();
+    }
+    if let Some(k) = va.unsat() {
+      writeln!(log, "state is unsat ({}){}", k,
+        if va.tru_lits[k].assigned() && va.tru_lits[-k].assigned() { "" } else { " (BUG)" })?;
+    } else {
+      writeln!(log, "state is not unsat{}", if unsat { " (BUG)" } else { "" })?;
     }
     if !c.is_empty() {
       writeln!(log, "\nTarget clause: {:?}", c)?;
@@ -625,7 +638,8 @@ impl Context {
 
     if !self.all_hints && !self.va.units_processed {
       for (&c, &l) in &self.units {
-        if !self.va.is_true(l) { self.va.add_unit(l, c) }
+        self.va.add_unit(l, c);
+        if let Some(k) = self.va.unsat() { return Some(k) }
       }
       self.va.units_processed = true;
     }
