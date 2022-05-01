@@ -7,7 +7,7 @@ FRAT-rs is a toolchain for processing and transforming files in the [FRAT format
 FRAT-rs can be compiled using `make`. (It is written in Rust, so you will need to
 [get Rust](https://rustup.rs/) first to put `cargo` in your path.)
 
-* `frat-rs elab FRATFILE [--full] [-s|-ss] [-m[NUM]] [DIMACSFILE [LRATFILE] [-v] [-c]]`:
+* `frat-rs elab FRATFILE [--full] [-s|-ss] [-m[NUM] LRATFILE [DIMACSFILE] [-v] [-c]]`:
   Elaborates `FRATFILE`, the unsatisfiability proof of `DIMACSFILE`,
   and produces the corresponding `LRATFILE`.
 
