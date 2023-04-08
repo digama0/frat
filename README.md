@@ -2,6 +2,22 @@
 
 FRAT-rs is a toolchain for processing and transforming files in the [FRAT format](https://link.springer.com/chapter/10.1007/978-3-030-72016-2_4).
 
+## Build
+
+You must have the `rust` toolchain, including `cargo`, installed. Then you can build with:
+
+```
+cargo clean
+cargo build --release
+```
+
+This builds the FRAT toolchain that reads and writes binary FRAT files. In case you need ascii FRAT format, build with:
+
+```
+cargo clean
+cargo build --features=ascii --release
+```
+
 ## Usage
 
 FRAT-rs can be compiled using `make`. (It is written in Rust, so you will need to
